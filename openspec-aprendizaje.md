@@ -80,6 +80,110 @@ Un "change" es un contenedor para todo el trabajo asociado a una tarea. Vive en 
 
 ---
 
+## Fecha: 2026-02-12
+
+## Segundo Ciclo: Common Module — Shared Kernel
+
+### Contexto
+
+Con el Parent POM completado en el primer ciclo, el siguiente paso natural era el modulo `common` — el shared kernel del que dependen los 4 microservicios. Sin el, ningun servicio puede definir entidades, aggregate roots, ni value objects. Es el cimiento del dominio.
+
+### Que construimos
+
+**1 POM + 7 clases Java + 4 clases de test = 31 tests pasando**
+
+```
+common/src/main/java/com/vehiclerental/common/
+├── domain/
+│   ├── entity/
+│   │   ├── BaseEntity.java        ← abstract, equals/hashCode por ID
+│   │   └── AggregateRoot.java     ← extiende BaseEntity, acumula domain events
+│   ├── event/
+│   │   └── DomainEvent.java       ← interface (no abstract class)
+│   ├── vo/
+│   │   └── Money.java             ← record con aritmetica currency-safe
+│   └── exception/
+│       └── DomainException.java   ← abstract, String errorCode (no HttpStatus)
+└── api/
+    ├── ApiResponse.java           ← record generico con factory of()
+    └── ApiMetadata.java           ← record con timestamp + requestId
+```
+
+### Flujo OpenSpec — Fast-Forward
+
+A diferencia del primer ciclo donde usamos `/opsx:continue` paso a paso, esta vez usamos `/opsx:ff` (fast-forward) para generar todos los artefactos de una vez: proposal, specs, design y tasks. Esto fue posible porque ya entendiamos el flujo y teniamos claridad sobre que construir.
+
+- **Leccion**: `/opsx:ff` es ideal cuando ya tienes claridad sobre el cambio. Si necesitas explorar o hay ambiguedad, mejor ir paso a paso con `/opsx:continue`.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: String errorCode en vez de HttpStatus
+- El dominio habla lenguaje de negocio: `"CUSTOMER_NOT_FOUND"`, no `404`.
+- El mapeo a HTTP queda en infraestructura (GlobalExceptionHandler).
+- Esto mantiene el modulo common con **cero dependencias Spring** en produccion.
+- **Leccion**: Es tentador poner `HttpStatus` en las excepciones por conveniencia, pero viola la arquitectura hexagonal. El dominio no sabe que existe HTTP.
+
+#### Decision 2: DomainEvent como interface, no abstract class
+- Los domain events concretos seran records inmutables (`record ReservationCreatedEvent(...) implements DomainEvent`).
+- Los records no pueden extender clases, pero si implementar interfaces.
+- Con `interface DomainEvent { UUID eventId(); Instant occurredOn(); }`, los accessors del record satisfacen el contrato automaticamente.
+- **Leccion**: Pensar en como se van a *usar* las abstracciones, no solo en como se definen. Si los eventos van a ser records, la base tiene que ser interface.
+
+#### Decision 3: Records para value objects y API responses
+- Money, ApiResponse, ApiMetadata son records de Java.
+- Inmutables por diseno, equals/hashCode/toString automaticos.
+- Jackson 2.12+ los serializa sin annotations, manteniendo cero dependencias.
+- **Leccion**: Los records son la solucion nativa de Java para datos inmutables. Elegirlos sobre Lombok `@Value` reduce dependencias y es mas idiomatico.
+
+#### Decision 4: Scope reducido (~8 clases en vez de ~13)
+- No implementamos subclases de excepcion (NotFoundException, etc.) ni PagedResponse.
+- Se dejan como extensiones naturales para cuando un servicio las necesite.
+- **Leccion**: En un POC, menos es mas. Implementar solo lo necesario para desbloquear el siguiente paso (los servicios).
+
+### Test-First en la Practica
+
+Este fue el primer ciclo donde aplicamos test-first de verdad. El flujo fue:
+
+1. Escribir los tests **antes** de las clases (BaseEntityTest, AggregateRootTest, MoneyTest, DomainExceptionTest)
+2. Los escenarios WHEN/THEN de las specs se tradujeron directamente a metodos de test
+3. Implementar las clases para que los tests pasen
+4. Build final: 31 tests, 0 fallos
+
+Ejemplo concreto — la spec decia:
+> WHEN two BaseEntity instances have the same non-null ID
+> THEN equals() SHALL return true
+
+Y el test se escribio literalmente asi:
+```java
+@Test
+void sameNonNullId_shouldBeEqual() {
+    UUID id = UUID.randomUUID();
+    var entity1 = new TestEntity(id);
+    var entity2 = new TestEntity(id);
+    assertThat(entity1).isEqualTo(entity2);
+}
+```
+
+- **Leccion**: Las specs bien escritas hacen que test-first sea casi mecanico. Cada WHEN/THEN es un test. No hay que inventar — solo traducir.
+
+### Particularidades del Apply
+
+- **El parent POM declara modulos que no existen todavia** (reservation-service, customer-service, etc.), asi que `mvn clean install -pl common` desde la raiz falla. La solucion fue ejecutar `mvn clean install` directamente desde `common/`. Esto funciona porque el POM del common hereda del parent sin necesitar que los otros modulos existan.
+- **`spring-boot-starter-test` se hereda del parent** como dependencia global en scope `test`. Esto es aceptable — no afecta el classpath de produccion. La verificacion de "zero Spring imports" se aplica solo a `common/src/main/`.
+- **Leccion**: En un multi-module con modulos aun no creados, se puede buildear un modulo individual desde su directorio. Maven resuelve el parent POM sin necesitar parsear todos los sibling modules.
+
+### Archive y Sync de Specs
+
+Al archivar, se sincronizaron 4 nuevas capabilities al source of truth en `openspec/specs/`:
+- `domain-base-classes` — BaseEntity, AggregateRoot, DomainEvent (10 requirements)
+- `shared-value-objects` — Money con aritmetica (9 requirements)
+- `domain-exceptions` — DomainException con errorCode (5 requirements)
+- `api-response-wrapper` — ApiResponse + ApiMetadata (6 requirements)
+
+El proyecto ahora tiene 6 capabilities especificadas en total (2 del primer ciclo + 4 de este).
+
+---
+
 ## Comandos Clave
 
 | Comando | Que hace |
@@ -111,9 +215,18 @@ Un "change" es un contenedor para todo el trabajo asociado a una tarea. Vive en 
 
 ## Reflexiones
 
+### Del primer ciclo (Parent POM)
 - **El flujo parece mucho overhead para una tarea tan chica** — y lo es. Pero el punto es aprender el ritmo. Para features grandes, este flujo previene errores costosos y asegura que todos entienden que se esta construyendo y por que.
 - **Explore antes de todo**: Leer los docs de best practices antes de generar codigo evita tener que rehacer cosas despues.
 - **Proposal como contrato**: Si el proposal no convence, no se sigue adelante. Ahorra implementar algo que nadie pidio.
 - **Las specs deben cubrir el proposal completo**: Si el proposal menciona algo (como banear logging legacy), las specs tambien deben incluirlo. Es facil olvidar detalles al pasar de un artefacto a otro — la revision humana es fundamental.
 - **Un spec file por capability**: La estructura `specs/<capability>/spec.md` mantiene las cosas organizadas y facilita encontrar que specs aplican a que parte del sistema.
 - **GroupId como decision consciente**: Elegimos `com.vehiclerental` para el proyecto. Parece trivial, pero en un proyecto real esta decision afecta namespaces, package names, y es dificil de cambiar despues. Mejor decidirlo explicitamente que dejarlo al azar.
+
+### Del segundo ciclo (Common Module)
+- **Test-first funciona cuando las specs son buenas**: Los escenarios WHEN/THEN de las specs se mapean 1:1 a tests. No hay ambiguedad. Escribir los tests primero se siente natural, no forzado.
+- **Fast-forward (`/opsx:ff`) vs paso a paso**: Cuando ya sabes que quieres construir, ff ahorra tiempo. Pero para features donde necesitas explorar, el flujo paso a paso con review humano en cada artefacto es mejor.
+- **La arquitectura hexagonal se defiende con restricciones concretas**: "Zero Spring in domain" no es un principio vago — es una regla verificable (`grep -r "org.springframework" common/src/main/`). Las restricciones que se pueden automatizar son las que realmente se cumplen.
+- **Records de Java son perfectos para DDD value objects**: Inmutabilidad, equals por valor, compact constructors para validacion. Money como record es mas limpio que con Lombok.
+- **El shared kernel es minimo por diseno**: Solo lo que todos necesitan. Las excepciones concretas, typed IDs, y otros artefactos especificos pertenecen a cada servicio. Resistir la tentacion de "ya que estamos, agreguemos X" mantiene el kernel limpio.
+- **Build parcial en multi-module**: Se puede compilar un modulo individual desde su directorio aunque los sibling modules no existan todavia. Util en las primeras fases del proyecto.
