@@ -29,6 +29,7 @@ The `docs/` folder contains 20 detailed best practice documents with code exampl
 ### OpenSpec Workflow
 
 Follow the OpenSpec spec-driven development workflow:
+
 1. `/opsx:new <change-name>` — Create a new change
 2. `/opsx:ff` — Fast-forward: generate proposal, specs, design, tasks
 3. Review and iterate on generated artifacts before implementing
@@ -53,6 +54,15 @@ Naming: `*Test.java` (unit), `*IT.java` (integration), `*SagaIT.java` (saga).
 - Aggregate Root accumulates domain events internally, published after persist
 - Use typed IDs (ReservationId, CustomerId) — never raw UUID/Long
 - BeanConfiguration in container module registers domain beans manually
+
+## Mandatory Reads by Code Area
+
+When implementing domain code: ALWAYS read docs/17 + docs/05 + docs/04 before writing any file.
+When implementing infrastructure: ALWAYS read docs/17 + docs/02 + docs/06 + docs/08 before writing any file.
+When implementing testing: ALWAYS read docs/04 + docs/03 before writing any test.
+When modifying Maven POMs: ALWAYS read docs/07 before editing.
+
+
 
 ## Build & Run
 

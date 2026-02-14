@@ -184,6 +184,101 @@ El proyecto ahora tiene 6 capabilities especificadas en total (2 del primer cicl
 
 ---
 
+## Fecha: 2026-02-14
+
+## Tercer Ciclo: Customer Domain — Primer Modulo de Negocio Real
+
+### Contexto
+
+Con el Parent POM y el Common Shared Kernel completados, el tercer change es el primero que toca logica de negocio real. El modulo `customer-domain` es el dominio del Customer Service — el mas simple de los 4 servicios (sin SAGA, sin dependencias cross-service). Es el candidato ideal para validar que los patrones DDD tacticos del shared kernel funcionan en la practica y establecer el modelo que seguiran los otros 3 servicios.
+
+### Que construimos
+
+**1 POM + 11 clases Java + 7 clases de test = 58 tests pasando**
+
+```
+customer-service/customer-domain/src/main/java/com/vehiclerental/customer/domain/
+├── model/
+│   ├── aggregate/
+│   │   └── Customer.java                  ← Aggregate Root (create, reconstruct, suspend, activate, delete)
+│   └── vo/
+│       ├── CustomerId.java                ← Typed ID (record, UUID)
+│       ├── Email.java                     ← Value Object (record, regex validation)
+│       ├── PhoneNumber.java               ← Value Object (record, formato y longitud)
+│       └── CustomerStatus.java            ← Enum (ACTIVE, SUSPENDED, DELETED)
+├── event/
+│   ├── CustomerCreatedEvent.java          ← Snapshot completo (customerId, firstName, lastName, email)
+│   ├── CustomerSuspendedEvent.java        ← Solo customerId
+│   ├── CustomerActivatedEvent.java        ← Solo customerId
+│   └── CustomerDeletedEvent.java          ← Solo customerId
+├── exception/
+│   └── CustomerDomainException.java       ← Extiende DomainException del common
+└── port/
+    └── output/
+        └── CustomerRepository.java        ← Interface (save, findById), solo tipos de dominio
+```
+
+### Flujo OpenSpec — Apply Directo
+
+Este ciclo fue diferente: los artefactos (proposal, specs, design, tasks) ya estaban generados con `/opsx:ff` en una sesion previa. Arrancamos directamente con `/opsx:apply`, que leyo los 23 tasks del `tasks.md` y los fue implementando uno a uno.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: CustomerDomainException como excepcion unica del dominio
+- Una sola clase de excepcion para todo el modulo customer-domain.
+- Se diferencia por el `errorCode` (e.g., `"CUSTOMER_INVALID_STATE"`, `"CUSTOMER_EMAIL_INVALID"`, `"CUSTOMER_ID_NULL"`).
+- No hay subclases como `CustomerNotFoundException` — eso pertenece a la capa de aplicacion.
+- **Leccion**: Una excepcion con error codes es mas simple y extensible que una jerarquia de excepciones. El errorCode es lo que importa para el API response, no el tipo de la clase.
+
+#### Decision 2: Factory methods `create()` y `reconstruct()` en vez de constructor publico
+- `Customer.create(firstName, lastName, email, phone)` — genera UUID, status ACTIVE, registra `CustomerCreatedEvent`.
+- `Customer.reconstruct(id, firstName, lastName, email, phone, status, createdAt)` — reconstruye desde persistencia sin validar ni emitir eventos.
+- Constructor privado, sin acceso publico.
+- **Leccion**: Este patron separa claramente la creacion de negocio (con invariantes y eventos) de la rehidratacion tecnica (desde JPA/base de datos). Es fundamental en DDD con arquitectura hexagonal porque el adapter de infraestructura necesita reconstruir el agregado sin disparar logica de dominio.
+
+#### Decision 3: Events con snapshot vs solo ID
+- `CustomerCreatedEvent` lleva snapshot completo: `customerId`, `firstName`, `lastName`, `email`. Los consumidores (como Reservation Service) pueden necesitar los datos sin hacer query aparte.
+- Los eventos de lifecycle (`Suspended`, `Activated`, `Deleted`) solo llevan `customerId` — los consumidores solo necesitan saber *que le paso a quien*.
+- **Leccion**: Pensar en los consumidores del evento al decidir que datos incluir. El evento de creacion es el "announcement" del agregado al mundo, los de lifecycle son notificaciones simples.
+
+#### Decision 4: Output port (CustomerRepository) en domain, no en application
+- La interface `CustomerRepository` vive en `domain/port/output/` porque no tenemos modulo de aplicacion todavia.
+- Es un contrato puro (solo tipos de dominio, cero Spring/JPA).
+- **Leccion**: Es pragmatico. La interface no tiene dependencias de framework, asi que moverla al modulo de aplicacion luego es un refactor trivial. No vale la pena crear el modulo de aplicacion solo para alojar una interface.
+
+### Test-First: Patron de Dependencias
+
+El orden de las tasks en el `tasks.md` original seguia la secuencia logica por secciones (1. Module Setup, 2. Value Objects, 3. Exception, 4. Events, 5. Aggregate). Pero al implementar, la excepcion se necesitaba *antes* que los value objects (porque `CustomerId`, `Email` y `PhoneNumber` lanzan `CustomerDomainException` en sus validaciones).
+
+**Lo que hicimos**: Implementamos `CustomerDomainException` (seccion 3) primero, y luego seguimos con value objects (seccion 2), events (seccion 4) y aggregate (seccion 5). Todas las tareas se completaron, pero el orden de ejecucion real fue diferente al orden del archivo.
+
+- **Leccion**: Al escribir tasks para un futuro `/opsx:apply`, ordenarlas por **dependencia de compilacion**, no por agrupacion logica. Las excepciones de dominio se usan en todas partes — van primero. Alternativa: agrupar en "foundational" (exception, enum) y "derived" (VOs, events, aggregate).
+
+### Build Workaround: `mvn install -N`
+
+El root POM declara 13 modulos, pero solo existen `common` y `customer-domain`. Al intentar buildear con `-pl` desde la raiz, Maven falla porque no puede parsear el POM si hay modulos declarados que no existen.
+
+**Solucion**: Tres pasos secuenciales:
+1. `mvn install -N` desde la raiz — instala *solo* el parent POM sin descender a modulos (`-N` = non-recursive).
+2. `mvn clean install` desde `common/` — compila e instala el shared kernel.
+3. `mvn clean install` desde `customer-service/customer-domain/` — compila el dominio con los 58 tests.
+
+- **Leccion**: `-N` (non-recursive) es esencial en multi-modules donde los modulos se construyen incrementalmente. Es el mismo workaround del segundo ciclo, pero ahora con un paso mas (common antes de customer-domain). A medida que agreguemos servicios, la cadena de builds individuales va a crecer. Eventualmente habra que crear los POMs minimos para los modulos faltantes, o usar profiles de Maven para gestionar builds parciales.
+
+### Verificacion Final
+
+- **58 tests, 0 fallos** — CustomerIdTest (3), EmailTest (7), PhoneNumberTest (7), CustomerDomainExceptionTest (4), CustomerDomainEventsTest (16), CustomerTest (10), CustomerLifecycleTest (11).
+- **Zero Spring imports** en `customer-service/customer-domain/src/main/` — confirmado con grep.
+- **BUILD SUCCESS** en `mvn clean install`.
+
+### Que falta para Customer Service completo
+
+Este change solo cubre el dominio. Faltan dos changes mas:
+1. **Application layer**: Use cases (CreateCustomerUseCase, SuspendCustomerUseCase, etc.), commands, DTOs, input ports, `@Transactional`.
+2. **Infrastructure + Container**: JPA entities separadas, persistence adapter, REST controller, `BeanConfiguration`, `@SpringBootApplication`.
+
+---
+
 ## Comandos Clave
 
 | Comando | Que hace |
@@ -230,3 +325,10 @@ El proyecto ahora tiene 6 capabilities especificadas en total (2 del primer cicl
 - **Records de Java son perfectos para DDD value objects**: Inmutabilidad, equals por valor, compact constructors para validacion. Money como record es mas limpio que con Lombok.
 - **El shared kernel es minimo por diseno**: Solo lo que todos necesitan. Las excepciones concretas, typed IDs, y otros artefactos especificos pertenecen a cada servicio. Resistir la tentacion de "ya que estamos, agreguemos X" mantiene el kernel limpio.
 - **Build parcial en multi-module**: Se puede compilar un modulo individual desde su directorio aunque los sibling modules no existan todavia. Util en las primeras fases del proyecto.
+
+### Del tercer ciclo (Customer Domain)
+- **El shared kernel se valida cuando lo usas**: Disenar `AggregateRoot<ID>`, `DomainEvent`, `DomainException` en abstracto es una cosa. Usarlos de verdad con `Customer extends AggregateRoot<CustomerId>` y `CustomerCreatedEvent implements DomainEvent` es donde se confirma que las abstracciones funcionan. Los 58 tests pasaron sin tener que modificar nada en common — buena senal.
+- **Factory methods son el patron correcto para Aggregate Roots**: `create()` vs `reconstruct()` es una distincion fundamental que se descubre al pensar en como la infraestructura va a rehidratar el agregado. Sin `reconstruct()`, el adapter de JPA tendria que hackear la creacion para evitar disparar eventos.
+- **El orden de tasks importa para la implementacion**: Las tasks agrupadas por concepto (VOs, Events, Aggregate) se leen bien como plan, pero al implementar las dependencias de compilacion mandan. Excepciones y enums primero, VOs despues, events despues, aggregate al final.
+- **Records de Java para domain events funcionan perfectamente**: `record CustomerCreatedEvent(UUID eventId, Instant occurredOn, ...) implements DomainEvent` — los accessors del record satisfacen la interface automaticamente. Validacion en compact constructor. Inmutabilidad gratis. Es el patron definitivo para DDD events en Java 21.
+- **Un dominio bien disenado es sorprendentemente pequeno**: 11 clases, la mayoria records de <20 lineas. La complejidad esta en las reglas de negocio (transiciones de estado, validaciones), no en la cantidad de codigo. Esto es DDD bien hecho — el modelo refleja el negocio sin infraestructura.
