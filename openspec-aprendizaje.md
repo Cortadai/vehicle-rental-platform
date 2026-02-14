@@ -466,3 +466,174 @@ Este change cubre domain + application. Falta un change mas:
 - **El flujo de apply fue rapido porque los artefactos eran claros**: Con las specs y el design bien definidos, implementar los 26 tasks fue mecanico — traducir specs a codigo, verificar con tests. No hubo ambiguedades ni decisiones ad-hoc.
 - **El multi-module build sigue requiriendo workarounds**: Los modulos que no existen (reservation-*, payment-*, fleet-*) impiden `mvn -pl` desde la raiz. El workaround de buildear modulo por modulo funciona pero no escala. Eventualmente habra que crear POMs minimos para los modulos faltantes o usar profiles.
 - **La cadena de dependencias es clara y unidireccional**: `common ← customer-domain ← customer-application`. No hay dependencias circulares ni shortcuts. Esto es la promesa de la arquitectura hexagonal cumplida en la practica.
+
+---
+
+## Fecha: 2026-02-14
+
+## Quinto Ciclo: Customer Infrastructure + Container — El Microservicio Cobra Vida
+
+### Contexto
+
+Con el dominio (58 tests) y la aplicacion (17 tests) completos, el Customer Service seguia siendo codigo sin vida propia: no podia arrancar, recibir peticiones HTTP ni persistir datos. Este change añade las dos capas externas de la arquitectura hexagonal: **infrastructure** (adaptadores de entrada y salida) y **container** (ensamblaje Spring Boot). Es el change mas grande hasta ahora — 25 tareas, ~20 ficheros de produccion, 11 tests de integracion — y el primero que produce un microservicio ejecutable.
+
+### Que construimos
+
+**2 POMs + ~20 ficheros Java + 1 SQL + 2 YMLs + 3 clases de test = 11 tests de integracion pasando**
+
+```
+customer-service/customer-infrastructure/src/main/java/com/vehiclerental/customer/infrastructure/
+├── adapter/
+│   ├── input/
+│   │   └── rest/
+│   │       ├── CustomerController.java           ← @RestController, inyecta 5 input ports
+│   │       └── dto/
+│   │           └── CreateCustomerRequest.java     ← record con @NotBlank, @Email
+│   └── output/
+│       ├── persistence/
+│       │   ├── CustomerJpaRepository.java         ← JpaRepository<CustomerJpaEntity, UUID>
+│       │   ├── CustomerRepositoryAdapter.java     ← @Component, implementa CustomerRepository
+│       │   ├── entity/
+│       │   │   └── CustomerJpaEntity.java         ← @Entity, separada del dominio
+│       │   └── mapper/
+│       │       └── CustomerPersistenceMapper.java ← Domain ↔ JPA, bidireccional
+│       └── event/
+│           └── CustomerDomainEventPublisherAdapter.java ← Logger no-op
+└── config/
+    └── GlobalExceptionHandler.java                ← @RestControllerAdvice
+
+customer-service/customer-container/src/main/java/com/vehiclerental/customer/
+├── CustomerServiceApplication.java                ← @SpringBootApplication
+└── config/
+    └── BeanConfiguration.java                     ← @Configuration, registra beans manuales
+
+customer-service/customer-container/src/main/resources/
+├── application.yml                                ← PostgreSQL, Flyway, puerto 8181
+├── application-test.yml                           ← Testcontainers JDBC URL
+└── db/migration/
+    └── V1__create_customer_table.sql              ← Flyway migration
+```
+
+### Flujo OpenSpec — La leccion mas valiosa: `/opsx:ff` vs `/opsx:new` + `/opsx:continue`
+
+Este fue el primer change donde usamos `/opsx:new` + `/opsx:continue` paso a paso en lugar de `/opsx:ff` (fast-forward). La diferencia fue **enorme**.
+
+#### El problema con `/opsx:ff` (ciclos 2, 3 y 4)
+
+En los ciclos anteriores usamos `/opsx:ff` para generar todos los artefactos de golpe. El resultado fue:
+- Los artefactos salian "contaminados": secciones copiadas del contexto del proyecto que no debian estar ahi, redaccion generica, decisiones sin justificar.
+- Hubo que revisar y corregir cada artefacto manualmente despues de generarlo.
+- El fast-forward prioriza velocidad sobre calidad — genera todo de una vez pero sin la pausa para reflexionar entre artefactos.
+
+#### El enfoque con `/opsx:new` + `/opsx:continue` (este ciclo)
+
+Aqui el flujo fue diferente:
+1. **`/opsx:new customer-infrastructure-and-container`** — creo el contenedor del change.
+2. **Proposal escrito por el usuario** — en vez de dejar que la IA lo generase, el usuario redacto la proposal con su propio criterio. Sabia exactamente que queria incluir y que excluir.
+3. **`/opsx:continue`** → genero el design.md leyendo la proposal como contexto. 10 decisiones con rationale y alternativas.
+4. **`/opsx:continue`** → genero las 5 specs (4 nuevas + 1 modificada) leyendo proposal + design.
+5. **`/opsx:continue`** → genero el tasks.md (25 tareas en 12 secciones) leyendo todos los artefactos previos.
+
+**Resultado**: Las 5 specs salieron aprobadas sin cambios. El design.md no necesito retoques. Solo se hizo un ajuste minimo al tasks.md (añadir una tarea 1.4 para los modulos en el root POM).
+
+#### Por que funciono mejor
+
+- **Cada artefacto se genero con contexto completo del anterior**: La IA leyo la proposal antes de escribir el design, leyo proposal + design antes de escribir las specs, etc. No hubo "adivinanza" — cada artefacto tenia su fundamento.
+- **Hubo pausa entre artefactos para revisar**: El usuario podia leer y aprobar antes de que se generase el siguiente. Con `/opsx:ff` esa revision es *post-hoc* — ya esta todo generado y corregir es mas engorroso.
+- **La proposal escrita por el usuario marco la direccion correcta**: El usuario sabia que incluir (JPA, REST, Flyway, Testcontainers) y que excluir (RabbitMQ, Docker Compose, Security, Swagger). Esa precision se propago al resto de artefactos.
+- **Menos tokens desperdiciados**: En `/opsx:ff` se genera todo de una vez y luego se corrige. Con `/opsx:continue` cada artefacto se hace bien a la primera.
+
+#### Cuando usar cada uno
+
+| Escenario | Comando | Razon |
+|-----------|---------|-------|
+| Change pequeño, scope muy claro, ya lo has hecho antes | `/opsx:ff` | Velocidad, si sale mal se corrige rapido |
+| Change grande o complejo, multiples decisiones de diseño | `/opsx:new` + `/opsx:continue` | Calidad, cada artefacto se revisa antes del siguiente |
+| Primer change en un area nueva del proyecto | `/opsx:new` + `/opsx:continue` | Necesitas pensar, no ir rapido |
+| Change donde el usuario tiene opinion fuerte sobre el proposal | `/opsx:new` + proposal manual | El usuario controla la direccion, la IA rellena los detalles |
+
+**Leccion clave**: `/opsx:ff` es para prisa, `/opsx:continue` es para precision. En un POC de aprendizaje, la precision siempre gana.
+
+### Decisiones de Diseño Clave
+
+#### Decision 1: JPA Entity completamente separada del Domain Entity
+- `CustomerJpaEntity` es una clase JPA pura: `@Entity`, `@Table`, setters, constructor publico sin argumentos.
+- `Customer` (dominio) tiene factory methods (`create`, `reconstruct`), campos inmutables y logica de negocio.
+- Un `CustomerPersistenceMapper` convierte entre las dos (~20 lineas).
+- **Leccion**: Es tentador poner `@Entity` en el agregado de dominio "para no duplicar". Pero eso fuerza setters publicos, constructor vacio, y anotaciones de Spring en el dominio — exactamente lo que la arquitectura hexagonal prohibe. La duplicacion de ~7 campos es un precio pequeño por la separacion total.
+
+#### Decision 2: El controller inyecta interfaces (input ports), no el ApplicationService
+- `CustomerController` inyecta `CreateCustomerUseCase`, `GetCustomerUseCase`, etc.
+- No inyecta `CustomerApplicationService` directamente.
+- **Leccion**: Dependency Inversion en la practica. Si mañana un use case necesita SAGA, se extrae a su propia clase y el controller no cambia ni una linea.
+
+#### Decision 3: BeanConfiguration como "pegamento" del hexagono
+- `@Configuration` en container registra manualmente `CustomerApplicationMapper`, `CustomerApplicationService`, y los 5 input ports (todos apuntando al mismo service).
+- Ni el dominio ni la aplicacion tienen `@Service` ni `@Component`.
+- **Leccion**: Este es el precio de la pureza hexagonal — alguien tiene que decirle a Spring que existen esos beans. BeanConfiguration es ese "alguien". Vive en container porque es el unico modulo que conoce todas las capas.
+
+#### Decision 4: Flyway + `ddl-auto: validate`
+- El esquema se gestiona con migraciones Flyway (`V1__create_customer_table.sql`).
+- Hibernate solo valida que el esquema coincida con las entidades JPA.
+- **Leccion**: `ddl-auto: update` es comodo pero peligroso — genera ALTER TABLE silenciosos. `validate` falla ruidosamente si hay desajuste. En produccion siempre Flyway.
+
+#### Decision 5: Testcontainers PostgreSQL, nunca H2
+- Los integration tests arrancan un contenedor PostgreSQL real.
+- URL JDBC de Testcontainers: `jdbc:tc:postgresql:16-alpine:///customer_db`.
+- **Leccion**: H2 simula PostgreSQL pero tiene diferencias reales (tipos de columna, restricciones, case sensitivity). "Funciona en tests, falla en produccion" es el antipatron clasico de usar H2. Testcontainers arranca en ~3 segundos y usa el mismo motor que produccion.
+
+### Errores y Soluciones Durante el Apply
+
+#### Error 1: Constructor `protected` en CustomerJpaEntity
+- El mapper esta en `infrastructure.adapter.output.persistence.mapper`, la entidad JPA en `infrastructure.adapter.output.persistence.entity` — paquetes **diferentes**.
+- Un constructor `protected` solo es accesible desde el mismo paquete o subclases.
+- **Solucion**: Cambiar a constructor `public`. El design decia "protected" siguiendo la convencion JPA, pero la realidad de los paquetes lo impedia.
+- **Leccion**: Las convenciones de JPA ("protected no-arg constructor") asumen que el mapper y la entidad estan en el mismo paquete. Cuando no lo estan, hay que ser pragmatico.
+
+#### Error 2: Tipo generico incompatible en GlobalExceptionHandler
+- `List<LinkedHashMap<String,String>>` no es asignable a `List<Map<String,String>>` por la invarianza de genericos en Java.
+- **Solucion**: Usar `var` para la variable local y tipar explicitamente los elementos como `Map<String, String>`.
+- **Leccion**: Los genericos de Java son invariantes: `List<LinkedHashMap>` NO es un `List<Map>` aunque `LinkedHashMap` extienda `Map`. Usar `var` evita el problema.
+
+#### Error 3: Dependencias transitivas sin parent POM instalado
+- Al intentar compilar `customer-infrastructure`, Maven no encontraba la version de `customer-domain` porque el parent POM no estaba instalado en el repositorio local.
+- **Solucion**: Cadena de instalacion secuencial: `mvn install -N` (parent) → `common` → `customer-domain` → `customer-application` → `customer-infrastructure` → `customer-container`.
+- **Leccion**: Mismo problema que en ciclos anteriores, pero ahora con 6 eslabones en la cadena. Es el coste de tener modulos que no existen todavia declarados en el root POM.
+
+### Verificacion Final
+
+- **11 tests de integracion, 0 fallos**:
+  - `CustomerControllerIT` — 7 tests (POST 201, GET 200, GET 404, suspend 200, activate 200, DELETE 204, validacion 400)
+  - `CustomerRepositoryAdapterIT` — 3 tests (round-trip save/findById, findById vacio, phone nullable)
+  - `CustomerServiceApplicationIT` — 1 test (smoke test de arranque de contexto)
+- **Domain y application siguen compilando** — BUILD SUCCESS, 75 tests previos intactos.
+- **Zero `@Service`/`@Component`** en domain y application `src/main/` — confirmado.
+- **Customer Service es ahora un microservicio funcional** — arranca en el puerto 8181, persiste en PostgreSQL, expone REST API con 5 endpoints.
+
+### El Customer Service Completo: 4 Modulos Hexagonales
+
+Con este change, el Customer Service tiene los 4 modulos que prescribe la arquitectura:
+
+```
+customer-service/
+├── customer-domain/         ← 11 clases, 58 tests unitarios, ZERO Spring
+├── customer-application/    ← 13 clases, 17 tests unitarios, solo spring-tx
+├── customer-infrastructure/ ← ~12 clases, @Component/@RestController/@Entity
+└── customer-container/      ← 2 clases + config, @SpringBootApplication
+```
+
+**Cadena de dependencias** (unidireccional):
+```
+container → infrastructure → application → domain → common
+```
+
+Ninguna flecha va hacia atras. El dominio no sabe que existe Spring. La aplicacion no sabe que existe JPA. La infraestructura no sabe como se ensambla el contexto. Cada capa conoce solo lo que necesita.
+
+### Reflexiones del quinto ciclo
+
+- **`/opsx:continue` paso a paso produce artefactos superiores a `/opsx:ff`**: Esta es la leccion estrella de la sesion. 5 specs aprobadas sin cambios vs artefactos contaminados que hay que corregir. La pausa entre artefactos no es un coste — es una inversion.
+- **La proposal escrita por el usuario es el artefacto mas valioso**: Cuando el usuario sabe lo que quiere y lo expresa con precision (que incluir, que excluir, que capabilities), el resto de artefactos se generan casi perfectos. La calidad de la proposal determina la calidad de todo el change.
+- **La arquitectura hexagonal se ve clara cuando las 4 capas existen**: Con solo domain + application, el hexagono era teoria. Ahora con infrastructure + container, se ve el patron completo: input adapters (REST) → input ports → application service → output ports → output adapters (JPA, Events). Cada pieza tiene su sitio.
+- **El "pegamento" del hexagono es mas codigo del esperado**: `BeanConfiguration` con 5 input ports, `CustomerPersistenceMapper`, `CreateCustomerRequest` (DTO REST separado de `CreateCustomerCommand`)... La separacion de capas tiene un coste en ficheros y mappers. Pero cada fichero tiene una responsabilidad clara y es facil de localizar.
+- **Los integration tests con Testcontainers son lentos pero fiables**: Arrancar un PostgreSQL tarda unos segundos, pero la confianza de que lo que funciona en tests funciona en produccion no tiene precio. H2 habria sido mas rapido pero con falsa seguridad.
+- **El Customer Service es el modelo para los otros 3 servicios**: Reservation, Payment y Fleet seguiran exactamente este patron de 4 modulos. Pero seran mas complejos: SAGA, Outbox, cross-service events. Customer fue el candidato perfecto para establecer el patron base porque es el mas simple.

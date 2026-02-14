@@ -84,6 +84,16 @@
                 <artifactId>customer-application</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>customer-infrastructure</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>customer-container</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
 
             <!-- MapStruct -->
             <dependency>
