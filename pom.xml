@@ -33,6 +33,7 @@
         <module>reservation-service/reservation-container</module>
         <!-- Customer Service -->
         <module>customer-service/customer-domain</module>
+        <module>customer-service/customer-application</module>
         <module>customer-service/customer-infrastructure</module>
         <module>customer-service/customer-container</module>
         <!-- Payment Service -->
@@ -67,10 +68,20 @@
     <!-- ==================== DEPENDENCY MANAGEMENT ==================== -->
     <dependencyManagement>
         <dependencies>
-            <!-- Internal module -->
+            <!-- Internal modules -->
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>common</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>customer-domain</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>customer-application</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
 

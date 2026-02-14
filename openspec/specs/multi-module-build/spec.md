@@ -21,12 +21,12 @@ The root POM SHALL use groupId `com.vehiclerental`, artifactId `vehicle-rental-p
 - **AND** the artifactId SHALL be `vehicle-rental-platform`
 - **AND** the packaging SHALL be `pom`
 
-### Requirement: All 13 modules declared
-The root POM SHALL declare all platform modules in a `<modules>` section: `common`, and for each service (reservation, customer, payment, fleet) its three submodules (`-domain`, `-infrastructure`, `-container`).
+### Requirement: All modules declared
+The root POM SHALL declare all platform modules in a `<modules>` section: `common`, and for each service (reservation, customer, payment, fleet) its submodules. Customer service includes a `-application` module following docs/17 four-module pattern.
 
 #### Scenario: Module list is complete
 - **WHEN** the root `pom.xml` is parsed
-- **THEN** it SHALL declare exactly 13 modules: `common`, `reservation-service/reservation-domain`, `reservation-service/reservation-infrastructure`, `reservation-service/reservation-container`, `customer-service/customer-domain`, `customer-service/customer-infrastructure`, `customer-service/customer-container`, `payment-service/payment-domain`, `payment-service/payment-infrastructure`, `payment-service/payment-container`, `fleet-service/fleet-domain`, `fleet-service/fleet-infrastructure`, `fleet-service/fleet-container`
+- **THEN** it SHALL declare `common`, `reservation-service/reservation-domain`, `reservation-service/reservation-infrastructure`, `reservation-service/reservation-container`, `customer-service/customer-domain`, `customer-service/customer-application`, `customer-service/customer-infrastructure`, `customer-service/customer-container`, `payment-service/payment-domain`, `payment-service/payment-infrastructure`, `payment-service/payment-container`, `fleet-service/fleet-domain`, `fleet-service/fleet-infrastructure`, `fleet-service/fleet-container`
 
 #### Scenario: customer-domain module directory exists
 
@@ -35,6 +35,19 @@ The root POM SHALL declare all platform modules in a `<modules>` section: `commo
 - **AND** the POM SHALL inherit from the root parent POM
 - **AND** the POM SHALL depend on `common` module
 - **AND** the POM SHALL have zero Spring dependencies in compile scope
+
+#### Scenario: customer-application module directory exists
+
+- **WHEN** the project directory structure is inspected
+- **THEN** `customer-service/customer-application/` SHALL exist with a valid `pom.xml`
+- **AND** the POM SHALL inherit from the root parent POM
+- **AND** the POM SHALL depend on `customer-domain` module
+- **AND** the POM SHALL depend on `spring-tx`
+
+#### Scenario: Module order for customer-application
+
+- **WHEN** the root `pom.xml` is parsed
+- **THEN** `customer-service/customer-application` SHALL appear after `customer-service/customer-domain` and before `customer-service/customer-infrastructure`
 
 ### Requirement: Java 21 configuration
 The root POM SHALL configure Java 21 as the source, target, and release version with `-parameters` compiler flag for method parameter name retention.

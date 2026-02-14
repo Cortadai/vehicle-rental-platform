@@ -332,3 +332,137 @@ Este change solo cubre el dominio. Faltan dos changes mas:
 - **El orden de tasks importa para la implementacion**: Las tasks agrupadas por concepto (VOs, Events, Aggregate) se leen bien como plan, pero al implementar las dependencias de compilacion mandan. Excepciones y enums primero, VOs despues, events despues, aggregate al final.
 - **Records de Java para domain events funcionan perfectamente**: `record CustomerCreatedEvent(UUID eventId, Instant occurredOn, ...) implements DomainEvent` — los accessors del record satisfacen la interface automaticamente. Validacion en compact constructor. Inmutabilidad gratis. Es el patron definitivo para DDD events en Java 21.
 - **Un dominio bien disenado es sorprendentemente pequeno**: 11 clases, la mayoria records de <20 lineas. La complejidad esta en las reglas de negocio (transiciones de estado, validaciones), no en la cantidad de codigo. Esto es DDD bien hecho — el modelo refleja el negocio sin infraestructura.
+
+---
+
+## Fecha: 2026-02-14
+
+## Cuarto Ciclo: Customer Application — La Capa de Orquestacion
+
+### Contexto
+
+Con el dominio del Customer Service completo (Aggregate Root, Value Objects, Domain Events, output port), faltaba la pieza que conecta el mundo exterior con el dominio: la capa de aplicacion. Sin ella, los controllers REST no tienen a quien llamar — en arquitectura hexagonal, la infraestructura nunca accede al dominio directamente, siempre pasa por los input ports de la aplicacion.
+
+Este change completa el patron de 4 modulos Maven por servicio que prescribe `docs/17`: domain, **application**, infrastructure, container. El root POM solo declaraba 3 (domain, infrastructure, container); ahora customer-service tiene los 4.
+
+### Que construimos
+
+**1 POM + 13 clases Java + 3 clases de test = 17 tests pasando**
+
+```
+customer-service/customer-application/src/main/java/com/vehiclerental/customer/application/
+├── port/
+│   ├── input/
+│   │   ├── CreateCustomerUseCase.java       ← interface: CustomerResponse execute(CreateCustomerCommand)
+│   │   ├── GetCustomerUseCase.java          ← interface: CustomerResponse execute(GetCustomerCommand)
+│   │   ├── SuspendCustomerUseCase.java      ← interface: void execute(SuspendCustomerCommand)
+│   │   ├── ActivateCustomerUseCase.java     ← interface: void execute(ActivateCustomerCommand)
+│   │   └── DeleteCustomerUseCase.java       ← interface: void execute(DeleteCustomerCommand)
+│   └── output/
+│       └── CustomerDomainEventPublisher.java ← interface: void publish(List<DomainEvent>)
+├── service/
+│   └── CustomerApplicationService.java      ← implementa los 5 input ports, zero business logic
+├── dto/
+│   ├── command/
+│   │   ├── CreateCustomerCommand.java       ← record (firstName, lastName, email, phone)
+│   │   ├── GetCustomerCommand.java          ← record (customerId)
+│   │   ├── SuspendCustomerCommand.java      ← record (customerId)
+│   │   ├── ActivateCustomerCommand.java     ← record (customerId)
+│   │   └── DeleteCustomerCommand.java       ← record (customerId)
+│   └── response/
+│       └── CustomerResponse.java            ← record (customerId, firstName, lastName, email, phone, status, createdAt)
+├── mapper/
+│   └── CustomerApplicationMapper.java       ← plain Java, toResponse(Customer) → CustomerResponse
+└── exception/
+    └── CustomerNotFoundException.java       ← extends RuntimeException (NO CustomerDomainException)
+```
+
+### Flujo OpenSpec — Apply Directo (otra vez)
+
+Igual que el tercer ciclo, los artefactos (proposal, specs, design, tasks) ya estaban generados previamente. Arrancamos con `/opsx:apply` directo sobre los 26 tasks del `tasks.md`.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: CustomerRepository se queda en domain
+- El output port `CustomerRepository` vive en `customer-domain/port/output/` y la aplicacion lo usa directamente.
+- La interface usa solo tipos de dominio (`Customer`, `CustomerId`), no tiene dependencias de framework.
+- Moverla a application no aporta nada funcional y solo generaria churn innecesario.
+- **Leccion**: Pragmatismo sobre purismo. Si la interface es framework-free y compila bien donde esta, no la muevas solo por dogma. Mover es un refactor trivial si algun dia se necesita.
+
+#### Decision 2: Un Application Service para los 5 use cases
+- `CustomerApplicationService` implementa las 5 interfaces de input port.
+- Con 5 metodos simples de orquestacion, no justifica 5 clases separadas.
+- Si un use case crece (e.g., SAGA), se puede extraer facilmente porque cada uno ya tiene su propia interface.
+- **Leccion**: El principio "one class per use case" es un guideline, no un mandato. Con 5 use cases simples, 5 archivos es over-engineering. Las interfaces *si* son una por use case — eso permite extraer despues.
+
+#### Decision 3: Commands con String, no CustomerId
+- Los commands llevan `String customerId`, no el typed ID del dominio.
+- La conversion `String → CustomerId` es responsabilidad del Application Service — es la "anti-corruption layer".
+- **Leccion**: Los DTOs de la capa de aplicacion son la frontera entre el mundo exterior (REST, mensajes) y el dominio. El mundo exterior habla en strings y UUIDs. El dominio habla en typed IDs. La traduccion es la responsabilidad de la capa de aplicacion.
+
+#### Decision 4: CustomerNotFoundException extends RuntimeException (no CustomerDomainException)
+- "No encontrado" es un concepto de aplicacion, no de dominio. El dominio no sabe de queries ni de persistencia.
+- Separar las excepciones permite al `GlobalExceptionHandler` mapear: `CustomerDomainException → 422`, `CustomerNotFoundException → 404`.
+- **Leccion**: No toda excepcion del Customer Service es una "excepcion de dominio". Las excepciones de dominio son violaciones de invariantes (estado invalido, email malformado). "No encontrado" es algo que solo existe cuando intentas cargar algo de la base de datos — eso es aplicacion.
+
+#### Decision 5: Lifecycle use cases retornan void
+- Suspend, Activate, Delete retornan `void` — son comandos, no queries (CQS).
+- Si el caller necesita el estado actualizado, hace un Get separado.
+- **Leccion**: CQS (Command Query Separation) mantiene la API limpia. Un `suspend()` que retorna el customer actualizado mezcla responsabilidades.
+
+#### Decision 6: Mapper manual en vez de MapStruct
+- `CustomerApplicationMapper` es una clase plain Java con un metodo `toResponse()` de ~10 lineas.
+- MapStruct agrega annotation processing, generacion de codigo y configuracion — todo para mapear 7 campos.
+- **Leccion**: MapStruct tiene sentido con 10+ entidades y mappings complejos. Para 7 campos, un metodo manual es mas legible, debuggeable y no agrega dependencias.
+
+### Patron de Orquestacion del Application Service
+
+Todos los metodos de escritura siguen el mismo flujo:
+
+```
+1. Convertir command → tipos de dominio
+2. Ejecutar operacion de dominio (create/suspend/activate/delete)
+3. Persistir via CustomerRepository.save()
+4. Publicar eventos via CustomerDomainEventPublisher.publish()
+5. Limpiar eventos del agregado: customer.clearDomainEvents()
+6. (Solo create) Retornar CustomerResponse via mapper
+```
+
+- **Leccion**: La capa de aplicacion es un template method glorificado. No hay logica de negocio — solo coreografia. Si ves un `if` en el Application Service, probablemente deberia estar en el dominio. La unica logica propia es "si no existe, lanzar CustomerNotFoundException".
+
+### Tests del Application Service
+
+Los tests verifican no solo el comportamiento sino tambien las restricciones arquitectonicas:
+
+1. **Flujo de create**: save → publish → clearDomainEvents → return response (con InOrder de Mockito)
+2. **Flujo de get**: findById → mapper → response, y el caso not found
+3. **Flujo de suspend/activate/delete**: findById → operacion de dominio → save → publish → clearDomainEvents
+4. **Sin @Service ni @Component**: verificacion por reflexion
+5. **@Transactional en writes, @Transactional(readOnly=true) en gets**: verificacion por reflexion
+
+- **Leccion**: Los tests de reflexion para anotaciones son una herramienta poderosa para validar restricciones arquitectonicas en unit tests. Si alguien agrega `@Service` por error, el test falla. Es mas rapido que ArchUnit para verificaciones puntuales.
+
+### Verificacion Final
+
+- **17 tests, 0 fallos** — CustomerNotFoundExceptionTest (3), CustomerApplicationMapperTest (2), CustomerApplicationServiceTest (12 tests en 5 nested classes).
+- **Zero `@Service`/`@Component`** en `customer-application/src/main/` — confirmado.
+- **customer-domain sigue compilando** — BUILD SUCCESS, 58 tests previos no se rompieron.
+
+### Root POM: dependencyManagement actualizado
+
+Ademas de agregar el modulo `customer-service/customer-application`, tambien agregamos `customer-domain` y `customer-application` al `<dependencyManagement>` del root POM. Esto centraliza las versiones y permite que los modulos dependientes los referencien sin especificar version.
+
+- **Leccion**: Cada vez que se agrega un modulo interno, deberia ir al `dependencyManagement` del parent. Esto no se habia hecho para `customer-domain` en el ciclo anterior — quedo pendiente y lo resolvimos ahora.
+
+### Que falta para Customer Service completo
+
+Este change cubre domain + application. Falta un change mas:
+1. **Infrastructure + Container**: JPA entities separadas con mappers, persistence adapter (`CustomerRepositoryImpl`), REST controller que usa los input ports, `BeanConfiguration` que registra manualmente el `CustomerApplicationService` y el mapper, `@SpringBootApplication`, y los adapters del `CustomerDomainEventPublisher` (outbox pattern).
+
+### Reflexiones del cuarto ciclo
+
+- **La capa de aplicacion es "thin by design"**: 13 clases y la mayoria son interfaces o records de 1-5 lineas. Solo el `CustomerApplicationService` tiene logica real, y son ~60 lineas de pura orquestacion. Esto es correcto — si la capa de aplicacion es gruesa, el dominio esta anemico.
+- **Records de Java siguen siendo la eleccion correcta para DTOs**: Commands y responses como records son inmutables, claros y sin boilerplate. El pattern `record CreateCustomerCommand(String firstName, ...)` es exactamente lo que Java 21 ofrece para este caso de uso.
+- **El flujo de apply fue rapido porque los artefactos eran claros**: Con las specs y el design bien definidos, implementar los 26 tasks fue mecanico — traducir specs a codigo, verificar con tests. No hubo ambiguedades ni decisiones ad-hoc.
+- **El multi-module build sigue requiriendo workarounds**: Los modulos que no existen (reservation-*, payment-*, fleet-*) impiden `mvn -pl` desde la raiz. El workaround de buildear modulo por modulo funciona pero no escala. Eventualmente habra que crear POMs minimos para los modulos faltantes o usar profiles.
+- **La cadena de dependencias es clara y unidireccional**: `common ← customer-domain ← customer-application`. No hay dependencias circulares ni shortcuts. Esto es la promesa de la arquitectura hexagonal cumplida en la practica.
