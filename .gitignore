@@ -52,6 +52,9 @@ docker-compose.override.yml
 # ===== Node (OpenSpec CLI) =====
 node_modules/
 
+# ===== Notas locales =====
+MEJORAS-PENDIENTES.md
+
 # ===== Claude Code =====
 # Keep .claude/commands/ and .claude/skills/ (tracked)
 # Ignore session/cache files if any appear
