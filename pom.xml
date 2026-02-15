@@ -27,19 +27,11 @@
     <!-- Design Decision 2: Flat module declaration with path-based references -->
     <modules>
         <module>common</module>
-        <!-- Reservation Service -->
-        <module>reservation-service/reservation-domain</module>
-        <module>reservation-service/reservation-infrastructure</module>
-        <module>reservation-service/reservation-container</module>
         <!-- Customer Service -->
         <module>customer-service/customer-domain</module>
         <module>customer-service/customer-application</module>
         <module>customer-service/customer-infrastructure</module>
         <module>customer-service/customer-container</module>
-        <!-- Payment Service -->
-        <module>payment-service/payment-domain</module>
-        <module>payment-service/payment-infrastructure</module>
-        <module>payment-service/payment-container</module>
         <!-- Fleet Service -->
         <module>fleet-service/fleet-domain</module>
         <module>fleet-service/fleet-application</module>
