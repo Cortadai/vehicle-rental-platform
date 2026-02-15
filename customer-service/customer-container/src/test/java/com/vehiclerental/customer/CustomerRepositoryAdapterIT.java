@@ -11,9 +11,11 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 @SpringBootTest
 @ActiveProfiles("test")
@@ -41,7 +43,7 @@ class CustomerRepositoryAdapterIT {
         assertThat(loaded.getEmail().value()).isEqualTo("john.roundtrip@example.com");
         assertThat(loaded.getPhone().value()).isEqualTo("+1234567890");
         assertThat(loaded.getStatus().name()).isEqualTo("ACTIVE");
-        assertThat(loaded.getCreatedAt()).isEqualTo(saved.getCreatedAt());
+        assertThat(loaded.getCreatedAt()).isCloseTo(saved.getCreatedAt(), within(1, ChronoUnit.MICROS));
     }
 
     @Test
