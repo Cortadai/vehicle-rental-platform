@@ -105,6 +105,16 @@
                 <artifactId>fleet-application</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>fleet-infrastructure</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>fleet-container</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
 
             <!-- MapStruct -->
             <dependency>

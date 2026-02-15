@@ -876,3 +876,169 @@ La similitud con Customer es deliberada. El Application Service es un template c
 ### Siguiente paso
 
 **fleet-infrastructure-and-container** — los adaptadores de infraestructura y el ensamblaje Spring Boot del Fleet Service. JPA entities, persistence adapter, REST controller con endpoints para Register/Get/SendToMaintenance/Activate/Retire, BeanConfiguration, Flyway migration, Testcontainers. Replicara el patron de customer-infrastructure-and-container.
+
+---
+
+## Fecha: 2026-02-15
+
+## Octavo Ciclo: Fleet Infrastructure + Container — El Segundo Microservicio Cobra Vida
+
+### Contexto
+
+Con el fleet-domain (50 tests) y fleet-application (17 tests) completos, el Fleet Service era codigo sin vida propia — igual que Customer antes de su quinto ciclo. Este change añade las dos capas externas de la arquitectura hexagonal: **infrastructure** (adaptadores REST y persistencia) y **container** (ensamblaje Spring Boot). Es el segundo microservicio funcional de la plataforma, replicando el patron exacto que se establecio con Customer Service en el quinto ciclo.
+
+La pregunta de este ciclo era directa: el patron de infrastructure + container de Customer, con sus 10 decisiones arquitectonicas, se replica para Fleet sin desviaciones? La respuesta: si, sin una sola desviacion.
+
+### Que construimos
+
+**2 POMs + ~12 ficheros Java + 1 SQL + 2 YMLs + 3 clases de test = 12 tests de integracion pasando**
+
+```
+fleet-service/fleet-infrastructure/src/main/java/com/vehiclerental/fleet/infrastructure/
+├── adapter/
+│   ├── input/
+│   │   └── rest/
+│   │       ├── VehicleController.java              ← @RestController, inyecta 5 input ports
+│   │       └── dto/
+│   │           └── RegisterVehicleRequest.java      ← record con @NotBlank, @NotNull
+│   └── output/
+│       ├── persistence/
+│       │   ├── VehicleJpaRepository.java            ← JpaRepository<VehicleJpaEntity, UUID>
+│       │   ├── VehicleRepositoryAdapter.java        ← @Component, implementa VehicleRepository
+│       │   ├── entity/
+│       │   │   └── VehicleJpaEntity.java            ← @Entity, separada del dominio, 11 campos
+│       │   └── mapper/
+│       │       └── VehiclePersistenceMapper.java    ← Domain ↔ JPA, bidireccional
+│       └── event/
+│           └── FleetDomainEventPublisherAdapter.java ← Logger no-op
+└── config/
+    └── GlobalExceptionHandler.java                  ← @RestControllerAdvice
+
+fleet-service/fleet-container/src/main/java/com/vehiclerental/fleet/
+├── FleetServiceApplication.java                     ← @SpringBootApplication
+└── config/
+    └── BeanConfiguration.java                       ← @Configuration, registra beans manuales
+
+fleet-service/fleet-container/src/main/resources/
+├── application.yml                                   ← PostgreSQL, Flyway, puerto 8182
+├── application-test.yml                              ← Testcontainers JDBC URL
+└── db/migration/
+    └── V1__create_vehicles_table.sql                 ← Flyway migration (NUMERIC, VARCHAR(3))
+```
+
+### Flujo OpenSpec — Apply Directo (patron consolidado)
+
+Los artefactos (proposal, specs, design, tasks) ya estaban generados con `/opsx:new` + `/opsx:continue` paso a paso en sesiones previas. Arrancamos con `/opsx:apply` directo sobre los 25 tasks del `tasks.md`. El flujo fue mecanico: leer los artefactos de contexto, implementar tarea por tarea, marcar como completada, verificar.
+
+Ya no hay debate sobre `/opsx:ff` vs `/opsx:continue` — el flujo step-by-step esta consolidado como el enfoque correcto para changes de esta complejidad.
+
+### Replicacion Sin Desviaciones
+
+Este es el aspecto mas destacable del ciclo. Las 10 decisiones arquitectonicas del quinto ciclo (customer-infrastructure-and-container) se aplicaron identicamente:
+
+1. **JPA Entity separada del dominio** — `VehicleJpaEntity` con getters/setters publicos, sin imports de dominio
+2. **RepositoryAdapter como persistence adapter** — `@Component`, inyecta JPA repo + mapper
+3. **Controller inyecta input ports, no ApplicationService** — 5 use case interfaces
+4. **REST DTO separado del Command** — `RegisterVehicleRequest` vs `RegisterVehicleCommand`
+5. **Event publisher como logger no-op** — mismo patron de log `"EVENT LOGGED (not published)"`
+6. **BeanConfiguration registra beans manuales** — mapper, application service, 5 input ports
+7. **Flyway + ddl-auto: validate** — migration SQL + Hibernate valida schema
+8. **GlobalExceptionHandler** — NotFound→404, DomainException→422, Validation→400, Generic→500
+9. **API path versioning** — `/api/v1/vehicles`
+10. **Testcontainers PostgreSQL** — `jdbc:tc:postgresql:16-alpine:///fleet_db`
+
+No hubo ninguna decision nueva. No hubo ninguna desviacion. El patron se replico 1:1.
+
+### Decisiones de Diseno Especificas de Fleet
+
+#### Decision 11: Tipos de columna vehiculares en Flyway
+- `daily_rate_amount NUMERIC(10,2) NOT NULL` — primer uso de tipo numerico en la plataforma (Customer solo tenia VARCHARs).
+- `daily_rate_currency VARCHAR(3) NOT NULL` — ajustado al largo exacto de ISO 4217 (EUR, USD, etc.).
+- `description VARCHAR(500)` — nullable, unico campo opcional. Mismo patron que `phone` en Customer.
+- `license_plate VARCHAR(255) NOT NULL UNIQUE` — UNIQUE constraint, mismo rol que `email` en Customer.
+- **Leccion**: PostgreSQL `NUMERIC` es el tipo correcto para dinero — precision exacta, sin errores de punto flotante. `VARCHAR(3)` para currency codes es tight pero correcto: ISO 4217 define exactamente 3 caracteres.
+
+#### Decision 12: Puerto 8182
+- Customer: 8181, Fleet: 8182. Secuencial y predecible.
+- Reservation: 8183, Payment: 8184 cuando se implementen.
+- **Leccion**: Asignar puertos secuenciales desde el principio evita conflictos cuando se levantan multiples servicios simultaneamente en desarrollo.
+
+### Incidente: Precision de Instant con TIMESTAMPTZ de PostgreSQL
+
+El unico problema durante la implementacion fue un test que fallaba:
+
+```
+expected: 2026-02-15T16:25:23.154364300Z
+ but was: 2026-02-15T16:25:23.154364Z
+```
+
+**Causa**: Java `Instant` tiene precision de nanosegundos (9 decimales). PostgreSQL `TIMESTAMPTZ` tiene precision de microsegundos (6 decimales). Al persistir y recuperar, los 3 ultimos digitos (los nanosegundos) se pierden.
+
+**Solucion**: Cambiar `assertThat(loaded.getCreatedAt()).isEqualTo(saved.getCreatedAt())` por:
+```java
+assertThat(loaded.getCreatedAt()).isCloseTo(saved.getCreatedAt(),
+        within(1, ChronoUnit.MICROS));
+```
+
+**Leccion**: Nunca comparar `Instant` con `isEqualTo` despues de un round-trip por PostgreSQL. La precision de microsegundos de `TIMESTAMPTZ` trunca los nanosegundos de Java. `isCloseTo` con tolerancia de 1 microsegundo es la comparacion correcta. Este mismo problema podria estar latente en los tests de Customer — `CustomerRepositoryAdapterIT.saveAndFindByIdRoundTrip()` pasa porque la Instant generada no tenia nanosegundos extra, pero no esta garantizado. Habria que revisarlo.
+
+### Stubs para Modulos Fantasma del Root POM (Deuda Tecnica)
+
+El root POM declara 13 modulos, pero solo existen 9 (common, customer x4, fleet x4). Los 6 restantes (reservation x3, payment x3) no tienen ni directorios. Esto impide hacer `mvn -pl` desde la raiz.
+
+**Solucion temporal**: Crear POMs minimos con solo `<parent>` y `<artifactId>` para los 6 modulos fantasma. Esto permite al reactor de Maven parsear el POM raiz sin errores.
+
+**Impacto**: Los stubs son ficheros vacios de ~10 lineas. No tienen dependencias, no compilan codigo, no ejecutan tests. Son puramente estructurales para desbloquear el build.
+
+**Deuda tecnica**: Estos stubs son un workaround. Las opciones correctas son:
+1. **No declarar modulos que no existen** — pero el root POM fue diseñado en el primer ciclo con todos los modulos previstos.
+2. **Usar profiles de Maven** — `<profiles>` para activar/desactivar grupos de modulos segun la fase del proyecto.
+3. **Crearlos cuando se implementen** — lo que hariamos naturalmente con los changes de reservation y payment.
+
+- **Leccion**: Declarar modulos futuros en el root POM fue una decision prematura del primer ciclo. Funciona como documentacion de la estructura prevista, pero tiene el coste de requerir stubs hasta que los modulos se implementen. En retrospeccion, habria sido mejor agregar los modulos al POM cuando se crean, no antes. Es una deuda tecnica menor pero molesta.
+
+### Verificacion Final
+
+- **12 tests de integracion, 0 fallos**:
+  - `VehicleControllerIT` — 8 tests (POST 201, GET 200, GET 404, maintenance 200, activate 200, retire 200, validacion 400, domain rule 422)
+  - `VehicleRepositoryAdapterIT` — 3 tests (round-trip save/findById, findById vacio, description nullable con dailyRate verificado)
+  - `FleetServiceApplicationIT` — 1 test (smoke test de arranque de contexto)
+- **Domain y application siguen compilando** — BUILD SUCCESS, tests previos intactos.
+- **Zero `@Service`/`@Component`** en domain y application `src/main/` — confirmado con grep.
+- **Fleet Service es ahora un microservicio funcional** — arranca en el puerto 8182, persiste en PostgreSQL, expone REST API con 5 endpoints.
+
+### Los Dos Microservicios de la Plataforma
+
+Con este change, la plataforma tiene dos servicios funcionales:
+
+```
+customer-service/ (puerto 8181)
+├── customer-domain/         ← 11 clases, 58 tests, ZERO Spring
+├── customer-application/    ← 13 clases, 17 tests, solo spring-tx
+├── customer-infrastructure/ ← ~12 clases, Spring full stack
+└── customer-container/      ← 2 clases + config, 11 integration tests
+
+fleet-service/ (puerto 8182)
+├── fleet-domain/            ← 12 clases, 50 tests, ZERO Spring
+├── fleet-application/       ← 15 clases, 17 tests, solo spring-tx
+├── fleet-infrastructure/    ← ~12 clases, Spring full stack
+└── fleet-container/         ← 2 clases + config, 12 integration tests
+```
+
+**Tests totales**: 58 + 17 + 11 + 50 + 17 + 12 = **165 tests**, todos pasando.
+
+**Endpoints REST**:
+- Customer: POST/GET/suspend/activate/DELETE en `/api/v1/customers`
+- Fleet: POST/GET/maintenance/activate/retire en `/api/v1/vehicles`
+
+### Reflexiones del octavo ciclo
+
+- **El patron se replica sin fricciones**: 10 decisiones arquitectonicas identicas, cero desviaciones. La segunda infrastructure + container fue significativamente mas rapida que la primera porque no hubo decisiones que tomar — solo ejecutar. Esto valida que el quinto ciclo (Customer) establecio un patron solido y reproducible.
+- **Los incidentes de precision temporal son sutiles y peligrosos**: El bug de `Instant` vs `TIMESTAMPTZ` no se habria detectado con H2 (que tiene precision diferente a PostgreSQL). Solo aparecio porque usamos Testcontainers con PostgreSQL real. Esto refuerza la decision de nunca usar H2 para tests de integracion — los bugs reales son los que ocurren con la base de datos real.
+- **Los stubs de modulos fantasma son deuda tecnica acumulada**: El workaround funciona, pero es un recordatorio de que declarar modulos futuros en el root POM tiene un coste. La proxima vez que se inicie un proyecto multi-modulo, la recomendacion es declarar modulos solo cuando existen.
+- **La velocidad de implementacion aumenta exponencialmente con cada servicio**: El primer servicio completo (Customer, ciclos 3-5) tomo 3 changes y multiples iteraciones. El segundo (Fleet, ciclos 6-8) tomo 3 changes pero cada uno fue mas rapido y mecanico. El tercero (Reservation o Payment) deberia ser aun mas rapido. Esta es la curva de aprendizaje de una arquitectura bien diseñada — la inversion inicial se amortiza con cada repeticion.
+- **8 changes, 165 tests, cero dependencias circulares**: La plataforma crece de forma predecible y controlada. Cada change agrega funcionalidad sin romper lo existente. Las metricas no mienten.
+
+### Siguiente paso
+
+**Reservation Service** o **Payment Service** — el tercer microservicio. Ambos seran mas complejos que Customer y Fleet porque involucran interacciones cross-service (SAGA, Outbox Pattern, domain events consumidos por otros servicios). Fleet y Customer son los servicios "simples"; Reservation y Payment son donde la complejidad real de los microservicios empieza.
