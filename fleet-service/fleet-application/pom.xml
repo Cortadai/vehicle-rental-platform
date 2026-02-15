@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.vehiclerental</groupId>
+        <artifactId>vehicle-rental-platform</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>fleet-application</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Fleet Service - Application</name>
+    <description>Fleet application layer: use case input ports, application service, command/response DTOs, and event publisher output port.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>fleet-domain</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>

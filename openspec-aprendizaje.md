@@ -742,3 +742,137 @@ El punto mas importante de este ciclo es que el shared kernel (`AggregateRoot`, 
 ### Siguiente paso
 
 **fleet-application** — la capa de orquestacion del Fleet Service. Replicara el patron de customer-application: input ports (use cases), commands, responses, ApplicationService, mapper. Deberia ser mas rapido que customer-application porque el patron ya esta establecido.
+
+---
+
+## Fecha: 2026-02-15
+
+## Septimo Ciclo: Fleet Application — La Orquestacion se Replica
+
+### Contexto
+
+Con el fleet-domain completo (50 tests, Vehicle Aggregate Root, Value Objects, Domain Events, output port), faltaba la capa que conecta el mundo exterior con el dominio: la capa de aplicacion. Este es el segundo modulo de aplicacion en la plataforma, replicando el patron exacto de customer-application. La pregunta de este ciclo no era "como se hace" — eso ya esta documentado en el cuarto ciclo — sino "se replica sin fricciones?".
+
+Este change completa el patron de 4 modulos Maven para el Fleet Service: domain (hecho), **application** (este change), infrastructure y container (futuros). Sigue las mismas decisiones arquitectonicas de customer-application: una interface por use case, commands con tipos primitivos/String, Application Service como pura orquestacion, mapper manual, y `@Transactional` como unica dependencia de Spring.
+
+### Que construimos
+
+**1 POM + 15 clases Java + 3 clases de test = 17 tests pasando**
+
+```
+fleet-service/fleet-application/src/main/java/com/vehiclerental/fleet/application/
+├── port/
+│   ├── input/
+│   │   ├── RegisterVehicleUseCase.java       ← interface: VehicleResponse execute(RegisterVehicleCommand)
+│   │   ├── GetVehicleUseCase.java            ← interface: VehicleResponse execute(GetVehicleCommand)
+│   │   ├── SendToMaintenanceUseCase.java     ← interface: void execute(SendToMaintenanceCommand)
+│   │   ├── ActivateVehicleUseCase.java       ← interface: void execute(ActivateVehicleCommand)
+│   │   └── RetireVehicleUseCase.java         ← interface: void execute(RetireVehicleCommand)
+│   └── output/
+│       └── FleetDomainEventPublisher.java    ← interface: void publish(List<DomainEvent>)
+├── service/
+│   └── FleetApplicationService.java         ← implementa los 5 input ports, zero business logic
+├── dto/
+│   ├── command/
+│   │   ├── RegisterVehicleCommand.java       ← record (licensePlate, make, model, year, category, dailyRateAmount, dailyRateCurrency, description)
+│   │   ├── GetVehicleCommand.java            ← record (vehicleId)
+│   │   ├── SendToMaintenanceCommand.java     ← record (vehicleId)
+│   │   ├── ActivateVehicleCommand.java       ← record (vehicleId)
+│   │   └── RetireVehicleCommand.java         ← record (vehicleId)
+│   └── response/
+│       └── VehicleResponse.java              ← record (vehicleId, licensePlate, make, model, year, category, dailyRateAmount, dailyRateCurrency, description, status, createdAt)
+├── mapper/
+│   └── FleetApplicationMapper.java           ← plain Java, toResponse(Vehicle) → VehicleResponse
+└── exception/
+    └── VehicleNotFoundException.java         ← extends RuntimeException (NO FleetDomainException)
+```
+
+### Flujo OpenSpec — Artefactos Step-by-Step, Apply Directo
+
+Los artefactos (proposal, specs, design, tasks) se generaron con `/opsx:new` + `/opsx:continue` paso a paso en sesiones previas, y luego se aplico con `/opsx:apply`. Consistente con la leccion de los ultimos ciclos: el flujo step-by-step produce artefactos limpios que no necesitan retoques. Las specs y el design salieron aprobados sin cambios.
+
+Un detalle: durante la revision del tasks.md, el usuario identifico dos omisiones que la IA no habia incluido:
+1. Tests separados para `FleetApplicationMapper` (mapeo campo a campo + description null) y `VehicleNotFoundException` (no extiende FleetDomainException, mensaje contiene vehicleId).
+2. Un grep explicito de `@Service|@Component` como tarea de verificacion independiente.
+
+Estas omisiones se corrigieron antes del apply, añadiendo tareas 6.11, 6.12 y 7.2.
+
+- **Leccion**: Revisar el tasks.md antes de implementar vale la pena. La IA tiende a asumir que los tests del service cubren todo, pero tests dedicados para mapper y exception verifican cosas que los tests de integracion del servicio no cubren (mapeo campo a campo, jerarquia de excepciones). El ojo humano detecta estos gaps.
+
+### Decisiones de Diseno Clave
+
+Las decisiones replican exactamente las de customer-application. No hubo decisiones nuevas — y eso es lo correcto.
+
+#### Decision 1: VehicleRepository se queda en domain
+- Misma decision que Customer. La interface usa solo tipos de dominio y no hay razon para moverla.
+
+#### Decision 2: Un Application Service para los 5 use cases
+- Misma decision que Customer. 5 metodos simples de orquestacion en una clase.
+
+#### Decision 3: RegisterVehicleCommand con tipos primitivos
+- `String licensePlate`, `String category`, `BigDecimal dailyRateAmount`, `String dailyRateCurrency`.
+- La conversion a `LicensePlate`, `VehicleCategory.valueOf()`, `new DailyRate(new Money(...))` es responsabilidad del Application Service.
+- El unico matiz vs Customer: `DailyRate` requiere descomponer `Money` en amount + currency, porque `Money` es un tipo compuesto. Esto genera dos campos en el command en vez de uno. Es mas verboso pero mapea naturalmente a JSON.
+- **Leccion**: Los commands como "anti-corruption layer" funcionan bien incluso con tipos compuestos del dominio. Si `Money` tuviera 3 campos, el command tendria 3 campos. La verbosidad es el precio de la separacion — y es un precio bajo.
+
+#### Decision 4: VehicleNotFoundException extends RuntimeException
+- Misma decision que Customer. "No encontrado" no es una invariante de dominio — es un concepto de la capa de aplicacion.
+
+#### Decision 5: Lifecycle use cases retornan void (CQS)
+- SendToMaintenance, Activate, Retire retornan `void`. Mismo patron que Customer.
+
+#### Decision 6: Mapper manual
+- `FleetApplicationMapper.toResponse()` mapea ~11 campos (mas que los ~7 de Customer por `dailyRateAmount`, `dailyRateCurrency`, `licensePlate`, `category`).
+- Sigue sin justificar MapStruct — son ~15 lineas de codigo.
+
+### Patron de Orquestacion: Identico a Customer
+
+El patron de todos los metodos de escritura es exactamente el mismo:
+
+```
+1. Convertir command → tipos de dominio (LicensePlate, VehicleCategory, DailyRate)
+2. Ejecutar operacion de dominio (Vehicle.create / sendToMaintenance / activate / retire)
+3. Persistir via VehicleRepository.save()
+4. Publicar eventos via FleetDomainEventPublisher.publish()
+5. Limpiar eventos del agregado: vehicle.clearDomainEvents()
+6. (Solo register/get) Retornar VehicleResponse via mapper
+```
+
+La similitud con Customer es deliberada. El Application Service es un template con variaciones minimas entre servicios.
+
+### Tests: 17 tests en 3 clases
+
+1. **FleetApplicationServiceTest** (12 tests en 6 nested classes):
+   - RegisterVehicle: save → publish → clearDomainEvents → return response (InOrder de Mockito)
+   - GetVehicle: found → response, not found → VehicleNotFoundException
+   - SendToMaintenance, ActivateVehicle, RetireVehicle: found → operacion + save + publish, not found → exception
+   - AnnotationChecks: sin @Service/@Component (reflexion), @Transactional en writes, @Transactional(readOnly=true) en get
+
+2. **FleetApplicationMapperTest** (2 tests):
+   - Mapeo de todos los campos incluyendo dailyRateAmount, dailyRateCurrency extraidos de Money
+   - Caso description null → null en response
+
+3. **VehicleNotFoundExceptionTest** (3 tests):
+   - getMessage() contiene vehicleId
+   - Extiende RuntimeException
+   - NO extiende FleetDomainException
+
+### Verificacion Final
+
+- **17 tests, 0 fallos** — VehicleNotFoundExceptionTest (3), FleetApplicationMapperTest (2), FleetApplicationServiceTest (12).
+- **Zero `@Service`/`@Component`** en `fleet-application/src/main/` — confirmado con grep.
+- **BUILD SUCCESS** en `mvn clean install` desde `fleet-service/fleet-application/`.
+- **common, customer-domain, customer-application y fleet-domain siguen compilando** — 58 + 17 + 50 = 125 tests previos intactos, 142 tests totales en la plataforma.
+- El build desde la raiz sigue fallando por los modulos que no existen — problema pre-existente.
+
+### Reflexiones del septimo ciclo
+
+- **La repetibilidad se confirma otra vez**: Fleet-application replico el patron de customer-application sin fricciones. Cero sorpresas, cero workarounds, cero cambios en modulos previos. El patron de 4 modulos hexagonales es reproducible — no solo para dominios, tambien para capas de aplicacion.
+- **El segundo es siempre mas rapido**: Customer-application tomo mas iteraciones (descubrir el patron de CQS, decidir sobre mapper manual vs MapStruct, discutir donde vive el repository). Fleet-application se implemento de una sola pasada porque todas esas decisiones ya estaban tomadas y documentadas. El valor del primer servicio bien hecho no esta solo en el servicio — esta en el precedente que establece.
+- **El tasks.md necesita revision humana**: La IA genero 28 tasks razonables, pero omitio tests unitarios para mapper y exception. El usuario detecto el gap comparando con customer-application. Las specs cubrian los requisitos pero no prescribian "un test por clase" — es responsabilidad del reviewer asegurar paridad de tests entre servicios.
+- **DailyRate como tipo compuesto es la unica variacion real vs Customer**: La necesidad de descomponer `Money` en `dailyRateAmount` + `dailyRateCurrency` en el command es el unico punto donde fleet-application difiere estructuralmente de customer-application. Todo lo demas (ports, service, exception, mapper) es 1:1 el mismo patron.
+- **142 tests, zero Spring en domain, zero @Service en application**: Las metricas hablan. La separacion hexagonal se mantiene consistente a medida que crece el proyecto. Cada modulo nuevo añade tests sin romper los previos.
+
+### Siguiente paso
+
+**fleet-infrastructure-and-container** — los adaptadores de infraestructura y el ensamblaje Spring Boot del Fleet Service. JPA entities, persistence adapter, REST controller con endpoints para Register/Get/SendToMaintenance/Activate/Retire, BeanConfiguration, Flyway migration, Testcontainers. Replicara el patron de customer-infrastructure-and-container.

@@ -42,6 +42,7 @@
         <module>payment-service/payment-container</module>
         <!-- Fleet Service -->
         <module>fleet-service/fleet-domain</module>
+        <module>fleet-service/fleet-application</module>
         <module>fleet-service/fleet-infrastructure</module>
         <module>fleet-service/fleet-container</module>
     </modules>
@@ -97,6 +98,11 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>fleet-domain</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>fleet-application</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
 
