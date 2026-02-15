@@ -637,3 +637,108 @@ Ninguna flecha va hacia atras. El dominio no sabe que existe Spring. La aplicaci
 - **El "pegamento" del hexagono es mas codigo del esperado**: `BeanConfiguration` con 5 input ports, `CustomerPersistenceMapper`, `CreateCustomerRequest` (DTO REST separado de `CreateCustomerCommand`)... La separacion de capas tiene un coste en ficheros y mappers. Pero cada fichero tiene una responsabilidad clara y es facil de localizar.
 - **Los integration tests con Testcontainers son lentos pero fiables**: Arrancar un PostgreSQL tarda unos segundos, pero la confianza de que lo que funciona en tests funciona en produccion no tiene precio. H2 habria sido mas rapido pero con falsa seguridad.
 - **El Customer Service es el modelo para los otros 3 servicios**: Reservation, Payment y Fleet seguiran exactamente este patron de 4 modulos. Pero seran mas complejos: SAGA, Outbox, cross-service events. Customer fue el candidato perfecto para establecer el patron base porque es el mas simple.
+
+---
+
+## Fecha: 2026-02-15
+
+## Sexto Ciclo: Fleet Domain — Segundo Bounded Context, Validando la Repetibilidad
+
+### Contexto
+
+Con el Customer Service completo (4 modulos, 86 tests, microservicio funcional), el siguiente paso era construir el segundo bounded context: Fleet. La pregunta clave de este ciclo no era "como se hace" — eso ya lo sabiamos por Customer — sino "es repetible?". Si los patrones DDD y la estructura hexagonal funcionan para un segundo servicio sin modificar el shared kernel, el diseno esta validado.
+
+Fleet gestiona el ciclo de vida de vehiculos: registrar, enviar a mantenimiento, activar, retirar. No gestiona reservas ni estado de alquiler — eso es responsabilidad del Reservation Service, que coordinara con Fleet a traves de SAGA events en un cambio futuro.
+
+### Que construimos
+
+**1 POM + 12 clases Java + 7 clases de test = 50 tests pasando**
+
+```
+fleet-service/fleet-domain/src/main/java/com/vehiclerental/fleet/domain/
+├── model/
+│   ├── aggregate/
+│   │   └── Vehicle.java                        ← Aggregate Root (create, reconstruct, sendToMaintenance, activate, retire)
+│   └── vo/
+│       ├── VehicleId.java                      ← Typed ID (record, UUID)
+│       ├── LicensePlate.java                   ← Value Object (record, validacion alphanumeric)
+│       ├── VehicleCategory.java                ← Enum (SEDAN, SUV, VAN, MOTORCYCLE)
+│       ├── VehicleStatus.java                  ← Enum (ACTIVE, UNDER_MAINTENANCE, RETIRED)
+│       └── DailyRate.java                      ← Value Object (record, wraps Money)
+├── event/
+│   ├── VehicleRegisteredEvent.java             ← Snapshot completo (vehicleId, licensePlate, make, model, year, category, dailyRate, description)
+│   ├── VehicleSentToMaintenanceEvent.java      ← Solo vehicleId
+│   ├── VehicleActivatedEvent.java              ← Solo vehicleId
+│   └── VehicleRetiredEvent.java                ← Solo vehicleId
+├── exception/
+│   └── FleetDomainException.java               ← Extiende DomainException del common
+└── port/
+    └── output/
+        └── VehicleRepository.java              ← Interface (save, findById), solo tipos de dominio
+```
+
+### Flujo OpenSpec — Step-by-Step Confirmado
+
+Este change uso `/opsx:new` + `/opsx:continue` paso a paso, no `/opsx:ff`. Los artefactos (proposal, specs, design, tasks) se generaron en sesiones anteriores con revision entre cada uno, y luego se aplico con `/opsx:apply`. El resultado confirmo la leccion del quinto ciclo: **el flujo step-by-step produce artefactos superiores**. Las 5 specs salieron limpias, el design captura 7 decisiones con rationale, y las 27 tasks se completaron sin sorpresas.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: Vehicle como Aggregate Root con tres estados, sin RENTED
+- Estados: `ACTIVE`, `UNDER_MAINTENANCE`, `RETIRED` (terminal).
+- Transiciones validas: ACTIVE → UNDER_MAINTENANCE, UNDER_MAINTENANCE → ACTIVE, ACTIVE|UNDER_MAINTENANCE → RETIRED.
+- No hay estado RENTED — el estado de alquiler lo gestiona Reservation Service a traves de queries de disponibilidad por rango de fechas, no como un estado del vehiculo.
+- **Leccion**: Es tentador agregar RENTED para "completar" el modelo. Pero eso acopla Fleet al ciclo de vida de Reservation. El principio de bounded contexts dice que cada servicio es dueno de su propio estado. Fleet sabe si un vehiculo esta operativo; Reservation sabe si esta reservado.
+
+#### Decision 2: DailyRate como wrapper de Money con validacion positiva
+- `DailyRate` es un record que wrappea `Money` del common y valida que `amount.signum() > 0`.
+- `Money` ya valida no-negativo, pero una tarifa diaria de cero no tiene sentido de negocio.
+- Este es el primer reuso real de un tipo del shared kernel como building block de un VO de dominio.
+- **Leccion**: Los wrappers de tipos del shared kernel son el mecanismo correcto para agregar restricciones de negocio sin modificar el kernel. `Money` es generico ("no negativo"); `DailyRate` es especifico ("estrictamente positivo").
+
+#### Decision 3: LicensePlate con validacion alphanumeric permisiva
+- Patron: alphanumerico con guiones y espacios, longitud 2-15.
+- Acepta `1234-BCD` (España), `ABC 1234` (otros paises), `M 1234 XY`.
+- No valida formato de pais especifico — eso seria over-engineering para un POC.
+- **Leccion**: Misma filosofia que `Email` en Customer: validar lo obvio (nulo, blanco, caracteres especiales), no lo exhaustivo. La validacion real de una matricula requiere un registro por pais — fuera de scope.
+
+#### Decision 4: `description` como unico campo nullable
+- Todos los campos del Vehicle son obligatorios excepto `description` (maximo 500 caracteres).
+- Mismo patron que `PhoneNumber` en Customer — el unico campo opcional.
+- **Leccion**: Mantener la cantidad de campos nullables al minimo. Cada nullable es un `if` en cada consumidor. Un dominio con muchos nullables es un dominio mal modelado.
+
+#### Decision 5: `isAvailable()` como convenience query
+- `isAvailable()` retorna `true` solo cuando `status == ACTIVE`.
+- Semanticamente diferente de `isActive()` de Customer: aqui "available" significa "puede asignarse a una reserva".
+- Preparado para la integracion futura con Reservation Service.
+- **Leccion**: Nombrar los metodos segun la intencion de negocio, no segun la implementacion. Hoy `isAvailable()` es identico a `status == ACTIVE`, pero el nombre comunica por que se llama.
+
+### El Shared Kernel Validado
+
+El punto mas importante de este ciclo es que el shared kernel (`AggregateRoot`, `DomainEvent`, `DomainException`, `Money`) **funciono sin modificaciones**:
+
+- `Vehicle extends AggregateRoot<VehicleId>` — igual que `Customer extends AggregateRoot<CustomerId>`.
+- `VehicleRegisteredEvent implements DomainEvent` — misma interface que `CustomerCreatedEvent`.
+- `FleetDomainException extends DomainException` — misma base que `CustomerDomainException`.
+- `DailyRate` wrappea `Money` — primer reuso real de un VO del kernel.
+
+50 tests pasaron sin tocar una linea en common. Esto confirma que el diseño del shared kernel en el segundo ciclo fue correcto.
+
+### Verificacion Final
+
+- **50 tests, 0 fallos** — FleetDomainExceptionTest (3), VehicleIdTest (3), LicensePlateTest (7), DailyRateTest (4), FleetDomainEventsTest (7), VehicleTest (15), VehicleLifecycleTest (11).
+- **Zero Spring imports** en `fleet-service/fleet-domain/src/main/` — confirmado.
+- **BUILD SUCCESS** en `mvn clean install` desde `fleet-service/fleet-domain/`.
+- **common y customer-domain siguen compilando** — 58 + 50 = 108 tests de dominio en total.
+- El build desde la raiz sigue fallando por los modulos que no existen (reservation-service, payment-service, fleet-infrastructure, fleet-container) — problema pre-existente, no causado por este change.
+
+### Reflexiones del sexto ciclo
+
+- **La repetibilidad es la prueba de fuego de una arquitectura**: Si el segundo servicio requiere hacks, workarounds o cambios en el shared kernel, el diseño fallo. Que Fleet replique el patron de Customer sin fricciones confirma que la estructura es solida. No solo funciona — es reproducible.
+- **El segundo bounded context es mas rapido que el primero**: Customer domain tomo mas iteraciones (ajustes en el task ordering, descubrir el patron de factory methods). Fleet se implemento de una sola pasada porque los patrones ya estaban establecidos. Este es el beneficio de invertir en un primer servicio bien hecho.
+- **Los tasks ordenados por dependencia de compilacion funcionan**: La leccion del tercer ciclo (excepciones primero, VOs despues, events despues, aggregate al final) se aplico aqui y el flujo fue mecanico. El tasks.md de Fleet ya venia con el orden correcto desde el principio.
+- **El workflow step-by-step (`/opsx:new` + `/opsx:continue`) sigue siendo superior**: Consistente con la leccion del quinto ciclo. Los artefactos generados paso a paso son mas limpios, mas precisos y requieren menos correcciones. Para changes de dominio con multiples decisiones de diseño, este es el camino.
+- **136 tests de dominio en total (86 Customer + 50 Fleet) sin una sola dependencia de Spring**: Esto valida que los modulos de dominio son verdaderamente puros. La arquitectura hexagonal no es solo un diagrama — es una realidad medible.
+
+### Siguiente paso
+
+**fleet-application** — la capa de orquestacion del Fleet Service. Replicara el patron de customer-application: input ports (use cases), commands, responses, ApplicationService, mapper. Deberia ser mas rapido que customer-application porque el patron ya esta establecido.

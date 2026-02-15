@@ -76,6 +76,24 @@ The root POM SHALL declare all platform modules in a `<modules>` section: `commo
 - **THEN** it SHALL declare `customer-infrastructure` with `${vehicle-rental.version}`
 - **AND** it SHALL declare `customer-container` with `${vehicle-rental.version}`
 
+#### Scenario: Module list includes fleet-domain
+
+- **WHEN** the root `pom.xml` is parsed
+- **THEN** it SHALL declare `fleet-service/fleet-domain` as a module
+
+#### Scenario: fleet-domain module directory exists
+
+- **WHEN** the project directory structure is inspected
+- **THEN** `fleet-service/fleet-domain/` SHALL exist with a valid `pom.xml`
+- **AND** the POM SHALL inherit from the root parent POM
+- **AND** the POM SHALL depend on `common` module
+- **AND** the POM SHALL have zero Spring dependencies in compile scope
+
+#### Scenario: dependencyManagement includes fleet-domain
+
+- **WHEN** the root POM `<dependencyManagement>` is inspected
+- **THEN** it SHALL declare `fleet-domain` with `${vehicle-rental.version}`
+
 ### Requirement: Java 21 configuration
 The root POM SHALL configure Java 21 as the source, target, and release version with `-parameters` compiler flag for method parameter name retention.
 
