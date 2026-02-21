@@ -1042,3 +1042,414 @@ fleet-service/ (puerto 8182)
 ### Siguiente paso
 
 **Reservation Service** o **Payment Service** — el tercer microservicio. Ambos seran mas complejos que Customer y Fleet porque involucran interacciones cross-service (SAGA, Outbox Pattern, domain events consumidos por otros servicios). Fleet y Customer son los servicios "simples"; Reservation y Payment son donde la complejidad real de los microservicios empieza.
+
+---
+
+## Fecha: 2026-02-21
+
+## Noveno Ciclo: Reservation Domain — El Dominio Mas Complejo de la Plataforma
+
+### Contexto
+
+Con Customer y Fleet completos (4 modulos hexagonales cada uno, 165 tests combinados), el siguiente paso era el tercer bounded context: Reservation. A diferencia de los dos anteriores — servicios CRUD simples con 3 estados cada uno — Reservation es el **coordinador de SAGA** de la plataforma: maquina de estados de 6 transiciones, inner entity con su propio ciclo de vida, IDs cross-context y domain events con snapshots inmutables. Es el primer dominio que pone a prueba las abstracciones del shared kernel con complejidad real.
+
+### Que construimos
+
+**1 POM + 14 clases Java + 12 clases de test = 80 tests pasando**
+
+```
+reservation-service/reservation-domain/src/main/java/com/vehiclerental/reservation/domain/
+├── model/
+│   ├── aggregate/
+│   │   └── Reservation.java                    ← Aggregate Root (6 transiciones, create/reconstruct)
+│   ├── entity/
+│   │   └── ReservationItem.java                ← Inner entity (subtotal = dailyRate x days)
+│   └── vo/
+│       ├── ReservationId.java                  ← Typed ID (record, UUID)
+│       ├── TrackingId.java                     ← ID publico para REST/SAGA (record, UUID)
+│       ├── CustomerId.java                     ← Cross-context ID, local al bounded context
+│       ├── VehicleId.java                      ← Cross-context ID, local al bounded context
+│       ├── DateRange.java                      ← VO con getDays(), invariantes estructurales
+│       ├── PickupLocation.java                 ← VO con address + city
+│       └── ReservationStatus.java              ← Enum: PENDING, CUSTOMER_VALIDATED, PAID, CONFIRMED, CANCELLING, CANCELLED
+├── event/
+│   ├── ReservationCreatedEvent.java            ← Record con snapshot completo + items
+│   ├── ReservationCancelledEvent.java          ← Record con failureMessages
+│   └── ReservationItemSnapshot.java            ← Record inmutable para datos de items en el evento
+├── exception/
+│   └── ReservationDomainException.java         ← Extiende DomainException del common
+└── port/
+    └── output/
+        └── ReservationRepository.java          ← Interface (save, findById, findByTrackingId)
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: Maquina de estados de 6 posiciones, sin shortcuts
+- Estados: `PENDING → CUSTOMER_VALIDATED → PAID → CONFIRMED` (happy path) + `CANCELLING → CANCELLED` (compensacion).
+- Cada transicion valida su estado origen. `cancel()` acepta tres estados fuente (PENDING, CUSTOMER_VALIDATED, CANCELLING) porque la cancelacion puede entrar desde diferentes puntos de la SAGA.
+- **Leccion**: Modelar la maquina de estados completa desde el principio, aunque solo se use `create()` por ahora. Las transiciones intermedias (`validateCustomer`, `pay`, `confirm`, `initCancel`) las invocara el orquestador SAGA — pero las reglas de que transiciones son validas son del dominio.
+
+#### Decision 2: CustomerId y VehicleId son locales al bounded context de Reservation
+- No se importan de `customer-domain` ni `fleet-domain`. Cada bounded context es dueño de su representacion de IDs externos.
+- Importar crearia acoplamiento Maven entre servicios, violando el principio de bounded contexts.
+- **Leccion**: En microservicios, el mismo concepto (un "vehicle ID") puede existir como tipos diferentes en distintos bounded contexts. Lo que se comparte es el valor (UUID), no el tipo.
+
+#### Decision 3: ReservationItem como `BaseEntity<UUID>`, no como typed ID
+- `ReservationItem` es una inner entity dentro del aggregate boundary. Nunca se referencia desde fuera.
+- Darle un `ReservationItemId` tipado seria ceremonia pura — un `UUID` como identidad interna es suficiente.
+- **Leccion**: Los typed IDs son para aggregate roots e IDs que cruzan fronteras. Para entidades internas, `BaseEntity<UUID>` directo es la opcion correcta.
+
+#### Decision 4: Solo dos domain events — los que importan fuera del agregado
+- `ReservationCreatedEvent` (arranca la SAGA) y `ReservationCancelledEvent` (auditoria/notificacion).
+- Las 4 transiciones intermedias son *reacciones* a eventos de otros servicios, no *fuentes* de eventos nuevos. Publicar eventos para cada transicion duplicaria lo que el orquestador SAGA ya gestiona via Outbox.
+- **Leccion**: Un domain event es un hecho que al mundo exterior le interesa. Las transiciones internas de la SAGA no lo son — son mecanismo, no negocio.
+
+#### Decision 5: ReservationCreatedEvent con ReservationItemSnapshot, no con entidades vivas
+- El snapshot previene que el evento tenga referencias mutables a entidades del agregado.
+- Los eventos son hechos inmutables. Si llevaran `ReservationItem` directamente, un cambio posterior al item se "filtraria" al evento.
+- **Leccion**: Siempre copiar datos al evento, nunca referenciar el modelo mutable. El snapshot pattern es el mecanismo correcto.
+
+#### Decision 6: DateRange valida invariantes estructurales, no temporales
+- "Devolucion despues de recogida" es un hecho estructural de cualquier rango. "Recogida en el futuro" depende del momento actual y es responsabilidad de la capa de aplicacion.
+- Esto tambien simplifica los tests: se pueden usar fechas pasadas sin mockear relojes.
+- **Leccion**: Separar invariantes atemporales (domain) de restricciones temporales (application). El dominio no deberia necesitar un `Clock` para validar sus reglas.
+
+### Tests: 80 tests en 12 clases
+
+| Clase de test | Tests | Que cubre |
+|--------------|-------|-----------|
+| ReservationTest | 12 | Creacion, acceso a campos, reconstruct, rechazo de nulos |
+| ReservationLifecycleTest | 16 | Las 6 transiciones, estados fuente validos e invalidos |
+| ReservationEventEmissionTest | 4 | Transiciones intermedias no emiten eventos |
+| ReservationItemTest | 9 | Calculo de subtotal, validacion, reconstruct |
+| ReservationDomainEventsTest | 10 | Ambos records de evento, DomainEvent impl |
+| ReservationDomainExceptionTest | 4 | errorCode, message, constructor con cause |
+| ReservationIdTest | 3 | Construccion, rechazo de null, igualdad |
+| TrackingIdTest | 3 | Construccion, rechazo de null, igualdad |
+| CustomerIdTest | 3 | Construccion, rechazo de null, igualdad |
+| VehicleIdTest | 3 | Construccion, rechazo de null, igualdad |
+| DateRangeTest | 8 | getDays(), dia unico, nulos, fechas iguales/invertidas |
+| PickupLocationTest | 5 | Combinaciones de null/blank en address y city |
+
+### Verificacion Final
+
+- **80 tests, 0 fallos** — el dominio mas grande de la plataforma.
+- **Zero Spring imports** en `reservation-service/reservation-domain/src/main/` — confirmado.
+- **BUILD SUCCESS** en `mvn clean install` desde `reservation-service/reservation-domain/`.
+
+### Diferencias vs Customer/Fleet domain
+
+| Aspecto | Customer / Fleet | Reservation |
+|---------|-----------------|-------------|
+| Maquina de estados | 3 estados, 4 transiciones | 6 estados, 6 transiciones |
+| Inner entities | Ninguna — agregado plano | ReservationItem como BaseEntity<UUID> |
+| IDs cross-context | Solo su propio typed ID | CustomerId + VehicleId locales |
+| Repository port | Solo findById | findById + findByTrackingId |
+| Domain events | 2 eventos simples | 2 eventos + ReservationItemSnapshot |
+| VOs nuevos | 2-3 por servicio | DateRange, PickupLocation, TrackingId (3 tipos genuinamente nuevos) |
+| Tests | 50-58 | 80 |
+
+### Reflexiones del noveno ciclo
+
+- **El shared kernel se valida con complejidad real**: Customer y Fleet eran dominios simples — agregados planos con 3 estados. Reservation pone a prueba `AggregateRoot<ID>` con inner entities, `DomainEvent` con snapshots compuestos, y `BaseEntity<UUID>` como identidad de entidad interna. Todo funciono sin modificar nada en common. Esto confirma que el diseño del segundo ciclo fue robusto.
+- **La maquina de estados de 6 posiciones es sorprendentemente concisa**: 6 transiciones con validacion de estado fuente son ~30 lineas de codigo en el Aggregate Root. La complejidad esta en la precision de las reglas ("cancel acepta 3 estados fuente"), no en la cantidad de codigo.
+- **Los tests del aggregate se benefician de la separacion en 3 ficheros**: ReservationTest (creacion), ReservationLifecycleTest (transiciones), ReservationEventEmissionTest (ausencia de eventos en transiciones intermedias). Con 32 tests combinados, un solo fichero seria inmanejable.
+- **80 tests de dominio puro — el primer dominio complejo del proyecto**: Customer (58) y Fleet (50) eran warmup. Reservation con 80 tests es el "proof of concept" real de que test-first con specs WHEN/THEN funciona para dominios no triviales.
+
+---
+
+## Fecha: 2026-02-21
+
+## Decimo Ciclo: Reservation Application — La Orquestacion con Complejidad Real
+
+### Contexto
+
+Con el reservation-domain completo (80 tests, 6-state machine, inner entity), faltaba la capa que conecta el mundo exterior con el dominio. A diferencia de customer-application y fleet-application — que tenian 5 use cases simples cada uno — reservation-application empieza con solo 2 use cases (create + track) porque los 5 use cases de transiciones SAGA (`validateCustomer`, `pay`, `confirm`, `initCancel`, `cancel`) se añadiran en el change del orquestador SAGA.
+
+### Que construimos
+
+**1 POM + 10 clases Java + 4 clases de test = 18 tests pasando**
+
+```
+reservation-service/reservation-application/src/main/java/com/vehiclerental/reservation/application/
+├── port/
+│   ├── input/
+│   │   ├── CreateReservationUseCase.java       ← interface: CreateReservationResponse execute(CreateReservationCommand)
+│   │   └── TrackReservationUseCase.java        ← interface: TrackReservationResponse execute(TrackReservationCommand)
+│   └── output/
+│       └── ReservationDomainEventPublisher.java ← interface: void publish(List<DomainEvent>)
+├── service/
+│   └── ReservationApplicationService.java      ← implementa los 2 input ports
+├── dto/
+│   ├── command/
+│   │   ├── CreateReservationCommand.java       ← record + inner CreateReservationItemCommand
+│   │   └── TrackReservationCommand.java        ← record (trackingId)
+│   └── response/
+│       ├── CreateReservationResponse.java      ← record (trackingId, status) — lean
+│       └── TrackReservationResponse.java       ← record (14 campos + inner TrackReservationItemResponse) — full
+├── mapper/
+│   └── ReservationApplicationMapper.java       ← plain Java
+└── exception/
+    └── ReservationNotFoundException.java       ← extends RuntimeException
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: Dos respuestas separadas — lean create, full track (CQS)
+- `CreateReservationResponse` lleva solo `trackingId` y `status` — el cliente ya tiene los datos que envio.
+- `TrackReservationResponse` es un snapshot completo: 14 campos + lista de items con vehicleId, dailyRate, days, subtotal.
+- **Leccion**: CQS aplicado a los DTOs de respuesta. Un unico tipo de respuesta hincharia el create o dejaria hambriento al track. Esta es la decision CQS mas marcada de la plataforma.
+
+#### Decision 2: CreateReservationCommand con inner record para items
+- `CreateReservationCommand` tiene `List<CreateReservationItemCommand>` con inner record para vehicleId, dailyRate, days.
+- Currency esta a nivel de command (no por item) porque todos los items de una reserva comparten moneda — simplificacion deliberada del POC.
+- **Leccion**: Los inner records en commands son el mecanismo correcto para datos compuestos. No necesitan ser clases top-level — su scope es exclusivamente el command.
+
+#### Decision 3: Tests separados por use case
+- `ReservationApplicationServiceCreateTest` (8 tests) y `ReservationApplicationServiceTrackTest` (4 tests) en ficheros separados.
+- En Customer y Fleet, un solo fichero bastaba. Aqui, el flujo de create (con conversion de items, currency compartida, order de save-publish-clear via InOrder de Mockito) ya genera 8 tests.
+- **Leccion**: Separar tests por use case cuando la complejidad lo justifica. La regla no es "un fichero por servicio" sino "un fichero por concern testeable".
+
+#### Decision 4: Solo 2 use cases por ahora — SAGA se añadira despues
+- Customer y Fleet ya estan a su numero final de use cases (5). Reservation empieza con 2 y crecera a 7 cuando se implemente la SAGA.
+- El `ReservationApplicationService` unico fue elegido porque la extraccion a un `ReservationSagaStepService` sera mecanica cuando llegue el momento.
+- **Leccion**: Diseñar para el presente, preparar para el futuro. Las interfaces (una por use case) permiten la extraccion. No hace falta el split ahora.
+
+### Verificacion Final
+
+- **18 tests, 0 fallos** — ReservationApplicationServiceCreateTest (8), ReservationApplicationServiceTrackTest (4), ReservationApplicationMapperTest (4), ReservationNotFoundExceptionTest (2).
+- **Zero `@Service`/`@Component`** en `reservation-application/src/main/` — confirmado.
+- **BUILD SUCCESS**.
+
+### Reflexiones del decimo ciclo
+
+- **La capa de aplicacion refleja la complejidad del dominio**: Customer/Fleet application tenian 13-15 clases con 5 use cases. Reservation application tiene 10 clases con 2 use cases — pero cada use case es mas denso (items compuestos, snapshots, currency compartida). Menos anchura, mas profundidad.
+- **El patron se mantiene pero las decisiones evolucionan**: Las decisiones basicas (commands con primitivos, mapper manual, excepcion extends RuntimeException) se replican. Las nuevas (CQS en respuestas, inner records, tests split por use case) son extensiones naturales del patron, no desviaciones.
+
+---
+
+## Fecha: 2026-02-21
+
+## Undecimo Ciclo: Reservation Infrastructure + Container — El Tercer Microservicio Cobra Vida
+
+### Contexto
+
+Con reservation-domain (80 tests) y reservation-application (18 tests) completos, el Reservation Service era codigo sin vida propia — igual que Customer y Fleet antes de sus ciclos de infrastructure. Este change añade las dos capas externas de la arquitectura hexagonal y produce el tercer microservicio funcional de la plataforma.
+
+La complejidad adicional vs Customer/Fleet es significativa: **parent-child JPA** (primer `@OneToMany` de la plataforma), `findByTrackingId` como segunda via de lookup, nested REST DTOs con validacion cascada, y un mapper de persistencia sustancialmente mas complejo (~50 lineas vs ~20).
+
+### Que construimos
+
+**2 POMs + 10 ficheros Java + 2 clases config + 1 SQL + 2 YMLs + 3 clases de test = 13 tests de integracion pasando**
+
+```
+reservation-service/reservation-infrastructure/src/main/java/com/vehiclerental/reservation/infrastructure/
+├── adapter/
+│   ├── input/
+│   │   └── rest/
+│   │       ├── ReservationController.java              ← @RestController, inyecta 2 input ports
+│   │       └── dto/
+│   │           └── CreateReservationRequest.java       ← record con inner CreateReservationItemRequest
+│   └── output/
+│       ├── persistence/
+│       │   ├── ReservationJpaRepository.java           ← JpaRepository + findByTrackingId
+│       │   ├── ReservationRepositoryAdapter.java       ← @Component
+│       │   ├── entity/
+│       │   │   ├── ReservationJpaEntity.java           ← @Entity con @OneToMany(cascade=ALL)
+│       │   │   └── ReservationItemJpaEntity.java       ← @Entity con @ManyToOne(LAZY)
+│       │   └── mapper/
+│       │       └── ReservationPersistenceMapper.java   ← ~50 lineas, reconstruye parent-child
+│       └── event/
+│           └── ReservationDomainEventPublisherAdapter.java ← Logger no-op (reemplazado por outbox en change #12)
+└── config/
+    └── GlobalExceptionHandler.java
+
+reservation-service/reservation-container/
+├── src/main/java/com/vehiclerental/reservation/
+│   ├── ReservationServiceApplication.java              ← @SpringBootApplication
+│   └── config/
+│       └── BeanConfiguration.java                      ← @Configuration, beans manuales
+├── src/main/resources/
+│   ├── application.yml                                 ← PostgreSQL, Flyway, puerto 8183
+│   └── db/migration/
+│       └── V1__create_reservation_tables.sql           ← 2 tablas (reservations + reservation_items) en 1 fichero
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: Parent-child JPA con CascadeType.ALL — primer @OneToMany de la plataforma
+- `ReservationJpaEntity` tiene `@OneToMany(mappedBy = "reservation", cascade = ALL, orphanRemoval = true)`.
+- `ReservationItemJpaEntity` tiene `@ManyToOne(fetch = LAZY)` de vuelta.
+- Customer y Fleet no tenian child entities — eran agregados planos.
+- **Leccion**: El cascade garantiza atomicidad transaccional — insertar reserva e items en un solo `save()`. Pero trae una consecuencia inesperada: los metodos find del adapter necesitan `@Transactional(readOnly = true)` para evitar `LazyInitializationException` al acceder a la coleccion lazy fuera de la sesion de Hibernate.
+
+#### Decision 2: @Transactional(readOnly = true) en find del adapter
+- Sin esta anotacion, la sesion de Hibernate se cierra despues de que `JpaRepository.findById()` retorna. Cuando el mapper intenta acceder a la coleccion `@OneToMany` lazy, lanza `LazyInitializationException`.
+- Customer y Fleet no necesitaban esto porque no tienen child entities.
+- **Leccion**: Cada `@OneToMany` lazy requiere que la transaccion este abierta cuando se accede a la coleccion. Este patron se documentara como requisito para futuros servicios con entidades hijas (e.g., Payment con line items).
+
+#### Decision 3: failureMessages como TEXT con comma-separated
+- Un solo campo `TEXT` en la tabla. El mapper une `List<String>` con comas al persistir y separa al cargar.
+- No se necesita tabla separada ni columna JSON — los failure messages son strings de diagnostico del SAGA, nunca se consultan individualmente.
+- **Leccion**: No todo necesita normalizacion. Los datos de diagnostico que solo se leen como bloque van bien en un campo TEXT.
+
+#### Decision 4: Dos tablas en una sola migracion Flyway
+- `V1__create_reservation_tables.sql` crea `reservations` y `reservation_items` con FK inline.
+- Customer y Fleet tenian una tabla cada uno. Aqui las dos tablas forman parte del mismo aggregate boundary — se despliegan juntas.
+- **Leccion**: La granularidad de migraciones Flyway sigue la granularidad del aggregate, no la del modelo relacional. Un aggregate = una migracion.
+
+#### Decision 5: Puerto 8183
+- Customer: 8181, Fleet: 8182, Reservation: 8183. Secuencial y predecible. Payment sera 8184.
+
+### Verificacion Final
+
+- **13 tests de integracion, 0 fallos**:
+  - `ReservationControllerIT` — 6 tests (POST 201 con items, GET 200 snapshot, GET 404, POST 400 invalido, POST 400 items vacios)
+  - `ReservationRepositoryAdapterIT` — 5 tests (round-trip con items, findByTrackingId, not found por ID, not found por trackingId)
+  - `ReservationServiceApplicationIT` — 2 tests (smoke test de arranque)
+- **Domain y application siguen compilando** — tests previos intactos.
+- **Reservation Service es ahora un microservicio funcional** — puerto 8183, REST API, PostgreSQL.
+
+### Reflexiones del undecimo ciclo
+
+- **El primer @OneToMany introduce lecciones que los agregados planos no enseñan**: LazyInitializationException, cascade, orphanRemoval, @Transactional en finds — todas estas son lecciones que solo emergen cuando hay child entities. Customer y Fleet eran demasiado simples para revelarlas.
+- **El mapper de persistencia es donde la complejidad se acumula**: ~50 lineas reconstruyendo 5 value objects (PickupLocation, DateRange, Money x3) mas una lista de child entities. Es el triple del mapper de Customer. MapStruct no ayudaria aqui porque los factory methods (`reconstruct()`) no siguen la convencion getter/setter.
+- **Tres microservicios funcionales**: La plataforma ahora tiene Customer (8181), Fleet (8182) y Reservation (8183). Los tres siguen el mismo patron hexagonal de 4 modulos, validando que la arquitectura escala.
+
+---
+
+## Fecha: 2026-02-21
+
+## Duodecimo Ciclo: Reservation Outbox + Messaging — El Cambio Mas Denso del Proyecto
+
+### Contexto
+
+Los 11 changes anteriores construyeron tres microservicios con arquitectura hexagonal completa, pero la publicacion de eventos era siempre un no-op: un `log.info()` que simulaba publicar. Ningun evento salia del proceso. Este change resuelve el **dual-write problem** e introduce mensajeria real con RabbitMQ.
+
+El problema fundamental: publicar a RabbitMQ dentro de un `@Transactional` crea dos operaciones de I/O independientes. Si la base de datos commitea pero el broker falla (o viceversa), el sistema queda permanentemente inconsistente. El **Outbox Pattern** elimina esto escribiendo el evento a una tabla `outbox_events` atomicamente con la entidad de negocio, y luego un scheduler aparte lo relay a RabbitMQ de forma asincrona.
+
+Este fue el change con mas superficie tecnica de todo el proyecto: un modulo Maven nuevo (`common-messaging`), Docker Compose con PostgreSQL + RabbitMQ, topologia AMQP, Flyway migration, Testcontainers con dos brokers simultaneos, y 3 lecciones documentadas en CLAUDE.md.
+
+### Que construimos
+
+#### Nuevo modulo: `common-messaging` (7 clases Java)
+
+```
+common-messaging/src/main/java/com/vehiclerental/common/messaging/
+├── outbox/
+│   ├── OutboxStatus.java              ← enum: PENDING, PUBLISHED, FAILED
+│   ├── OutboxEvent.java               ← @Entity con factory method, markPublished(), markFailed()
+│   ├── OutboxEventRepository.java     ← Spring Data JPA + queries custom
+│   └── OutboxPublisher.java           ← @Scheduled(fixedDelay=500), TransactionTemplate per event
+├── cleanup/
+│   └── OutboxCleanupScheduler.java    ← @Scheduled(cron daily 3AM), elimina PUBLISHED > 7 dias
+└── config/
+    ├── MessagingSchedulingConfig.java ← @EnableScheduling (auto-detected por component scan)
+    └── MessageConverterConfig.java    ← Jackson2JsonMessageConverter para RabbitTemplate
+```
+
+#### Infraestructura nueva en reservation-service
+
+- `OutboxReservationDomainEventPublisher.java` — reemplaza el logger no-op. Implementa `ReservationDomainEventPublisher` pero no tiene **ningun import de RabbitMQ** — solo depende de `OutboxEventRepository` (JPA) y `ObjectMapper` (Jackson). Escribe a la tabla outbox; el relay a RabbitMQ es trabajo del `OutboxPublisher`.
+- `RabbitMQConfig.java` — declara la topologia AMQP: `reservation.exchange` (TopicExchange), `reservation.created.queue` con DLQ routing, `dlx.exchange` (DirectExchange), `reservation.dlq`, y los bindings correspondientes.
+
+#### Docker Compose + infraestructura de desarrollo
+
+- `docker-compose.yml` — 2 servicios bajo perfil `infra`: PostgreSQL 16 (multi-schema con usuarios dedicados) y RabbitMQ 3.13 (management + pre-carga de topologia). Health checks, volumenes nombrados.
+- `docker/postgres/init-schemas.sql` — crea 4 schemas (reservation, customer, payment, fleet) con usuarios dedicados y `search_path` por usuario. Idempotente con `IF NOT EXISTS`.
+- `docker/rabbitmq/definitions.json` — pre-declara la topologia completa de los 4 servicios al arranque del broker. Previene race conditions donde un servicio arranca antes de que su topologia exista.
+- `docker/rabbitmq/rabbitmq.conf` — `load_definitions` apuntando al JSON.
+- `Makefile` — 5 targets: `infra-up`, `infra-down`, `infra-reset` (wipe volumes), `infra-status`, `infra-logs`.
+
+#### Migration y tests de integracion
+
+- `V2__create_outbox_events_table.sql` — tabla `BIGSERIAL` con indice compuesto `(status, created_at)`.
+- `OutboxAtomicityIT` (3 tests) — el test mas importante del change: verifica que reserva y outbox event se escriben en la misma transaccion, y que un fallo de dominio rollbackea ambos.
+- `OutboxPublisherIT` (2 tests) — end-to-end: crea un `OutboxEvent` PENDING, espera con Awaitility a que el scheduler lo marque PUBLISHED, y verifica que el mensaje llego a la cola de RabbitMQ.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: `common-messaging` como modulo Maven separado, no dentro de `common`
+- `common` es pure Java: `DomainEvent`, `AggregateRoot`, `Money`. Meter JPA entities y Spring scheduling ahi violaria el principio hexagonal que este POC enseña.
+- Duplicar las ~7 clases de outbox en cada servicio no aporta valor educativo.
+- **Leccion**: `common` = shared kernel puro (cero Spring). `common-messaging` = infraestructura compartida (Spring JPA + AMQP). Dos modulos, dos responsabilidades.
+
+#### Decision 2: TransactionTemplate per-event, no @Transactional por batch
+- El metodo `@Scheduled` del `OutboxPublisher` NO es `@Transactional`. Cada evento individual se wrappea en `transactionTemplate.executeWithoutResult(...)`.
+- Si el evento #47 falla, los 46 anteriores ya estan commiteados como PUBLISHED.
+- Una transaccion por batch rollbackearia todos si uno falla.
+- **Leccion**: Para procesamiento de listas con efectos secundarios (publicar a broker), la granularidad de transaccion debe ser por item, no por batch.
+
+#### Decision 3: Polling (@Scheduled 500ms), no CDC (Debezium)
+- Change Data Capture con Debezium requiere Kafka Connect — infraestructura desproporcionada para un POC.
+- 500ms de latencia es aceptable para una plataforma de alquiler de vehiculos.
+- El polling es mas debuggeable y retry-safe: si la publicacion falla, el evento queda PENDING y se reintenta en el siguiente ciclo.
+- **Leccion**: La solucion simple y correcta es mejor que la sofisticada y compleja. Debezium es la opcion correcta a escala; polling es la opcion correcta para aprender.
+
+#### Decision 4: TopicExchange con routing key `{service}.{event-type}`
+- `TopicExchange` permite wildcard bindings: un futuro servicio de auditoria puede bindear `*.created` para recibir todos los eventos de creacion.
+- `DirectExchange` seria demasiado rigido, `FanoutExchange` demasiado indiscriminado.
+- **Leccion**: TopicExchange es el default sensato para event-driven architectures. La flexibilidad de wildcards justifica la minima complejidad adicional.
+
+#### Decision 5: definitions.json pre-declara la topologia completa de los 4 servicios
+- Todas las exchanges, queues, DLQs y bindings de los 4 servicios se pre-crean al arrancar RabbitMQ — aunque 3 servicios no usen messaging todavia.
+- Colas vacias no cuestan nada. La topologia estable como infraestructura evita race conditions.
+- **Leccion**: La topologia del broker es infraestructura, no configuracion de aplicacion. Declararla centralmente en `definitions.json` es mas fiable que depender de que cada servicio cree sus beans `@Bean` antes de que otro servicio intente publicar.
+
+#### Decision 6: OutboxReservationDomainEventPublisher tiene cero imports de RabbitMQ
+- El adapter solo depende de `OutboxEventRepository` (JPA) y `ObjectMapper` (Jackson).
+- Escribir al outbox es una operacion de base de datos pura. El relay asincrono a RabbitMQ es responsabilidad del `OutboxPublisher` del modulo `common-messaging`.
+- **Leccion**: Separar "guardar para publicar" de "publicar" es la esencia del Outbox Pattern. El adapter que guarda no debe conocer el broker.
+
+### Lecciones Aprendidas (documentadas en CLAUDE.md)
+
+Este change genero 3 lecciones concretas que se añadieron a CLAUDE.md para referencia futura:
+
+**1. Cross-module JPA scanning requiere las 3 anotaciones**
+Cuando `reservation-service` importo `common-messaging`, Spring Boot NO auto-detecto `OutboxEvent` (@Entity) ni `OutboxEventRepository` porque viven fuera del package base del servicio. `@SpringBootApplication(scanBasePackages)` solo no basta — `@EntityScan` y `@EnableJpaRepositories` tienen scanning independiente y ambos deben apuntar a `com.vehiclerental`.
+
+**2. Una vez messaging esta en el classpath, TODOS los ITs necesitan RabbitMQ**
+Agregar `common-messaging` (que trae `spring-boot-starter-amqp`) al classpath hace que `OutboxPublisher` requiera un `RabbitTemplate`, que requiere conexion a RabbitMQ. Los ITs previamente verdes (`ReservationControllerIT`, `ReservationRepositoryAdapterIT`) empezaron a fallar al cargar el contexto. Solucion: `@Container @ServiceConnection RabbitMQContainer` en cada IT.
+
+**3. Los domain events son transitorios — publicar desde el agregado ORIGINAL**
+`reservationRepository.save(reservation)` retorna un objeto nuevo reconstruido desde JPA. Los domain events NO sobreviven el round-trip domain→JPA→domain. Hay que llamar `publish(reservation.getDomainEvents())` sobre la variable original, no sobre el objeto retornado por `save()`.
+
+### Verificacion Final
+
+- **5 tests de integracion nuevos** (OutboxAtomicityIT: 3, OutboxPublisherIT: 2), todos pasando.
+- **13 ITs previos del change #11 siguen pasando** (ahora con `RabbitMQContainer` añadido).
+- **Total ITs en reservation-container: 18** (13 del walking skeleton + 5 del outbox).
+- **`common-messaging`** compila y se instala correctamente como modulo Maven.
+- **Docker Compose** levanta PostgreSQL y RabbitMQ con health checks.
+
+### Los Tres Microservicios + Messaging
+
+Con este change, la plataforma tiene:
+
+```
+customer-service/  (puerto 8181) ← event publisher: logger no-op
+fleet-service/     (puerto 8182) ← event publisher: logger no-op
+reservation-service/ (puerto 8183) ← event publisher: OUTBOX PATTERN → RabbitMQ
+
+common/            ← shared kernel, zero Spring
+common-messaging/  ← outbox pattern, Spring JPA + AMQP
+```
+
+**Tests totales en la plataforma**:
+- customer-domain: 58, customer-application: 17, customer-container: 11 = **86**
+- fleet-domain: 50, fleet-application: 17, fleet-container: 12 = **79**
+- reservation-domain: 80, reservation-application: 18, reservation-container: 18 = **116**
+- **Total: 281 tests**, todos pasando.
+
+### Reflexiones del duodecimo ciclo
+
+- **El Outbox Pattern es conceptualmente simple pero operativamente denso**: "Escribir a una tabla, leer y publicar" suena trivial. Pero la implementacion correcta involucra: TransactionTemplate per-event (no por batch), retry con contador, estado FAILED despues de N intentos, cleanup scheduler, IndiceSQL compuesto, Jackson serialization, message headers, DLQ routing. Cada detalle importa.
+- **Cross-module Spring scanning es la trampa mas sutil de Spring Boot**: `scanBasePackages` solo NO detecta `@Entity` ni repositorios en otros modulos. Hay que recordar las 3 anotaciones (`@SpringBootApplication`, `@EntityScan`, `@EnableJpaRepositories`) cada vez que se importa un modulo con JPA. Este error es invisible hasta runtime.
+- **Los ITs que no tocan messaging se rompen cuando messaging entra al classpath**: Spring Boot auto-configura todo lo que encuentra en el classpath. Si `spring-boot-starter-amqp` esta presente, necesita un broker — aunque el IT solo testee persistencia. La solucion es un `@Container RabbitMQContainer` en cada IT, o mejor, una clase `BaseIT` compartida.
+- **Docker Compose como infraestructura declarativa cambia el workflow de desarrollo**: Antes habia que configurar PostgreSQL manualmente. Ahora `make infra-up` levanta todo. `definitions.json` pre-crea la topologia de RabbitMQ. Los Testcontainers en ITs usan imagenes identicas. La paridad dev/test/prod es real.
+- **12 changes, 281 tests, primer servicio con messaging real**: La plataforma paso de skeleton a sistema funcional. Customer y Fleet son CRUD simples; Reservation ya tiene maquina de estados, inner entities, outbox pattern y RabbitMQ. El siguiente paso natural es Payment (walking skeleton) y luego la SAGA que los conecta a todos.
+
+### Siguiente paso
+
+**payment-walking-skeleton** — el cuarto y ultimo microservicio. Replica el patron hexagonal consolidado en Customer y Fleet: domain con aggregate Payment, application con use cases, infrastructure con JPA/REST, container con Testcontainers. Es el change mas mecanico del proyecto porque el patron ya esta establecido y documentado. Despues de Payment, viene la SAGA Orchestration que conecta los 4 servicios.
