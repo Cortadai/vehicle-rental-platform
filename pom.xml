@@ -43,6 +43,8 @@
         <module>reservation-service/reservation-application</module>
         <module>reservation-service/reservation-infrastructure</module>
         <module>reservation-service/reservation-container</module>
+        <!-- Payment Service -->
+        <module>payment-service/payment-domain</module>
     </modules>
 
     <!-- ==================== PROPERTIES ==================== -->
@@ -116,6 +118,11 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>reservation-container</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>payment-domain</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
             <dependency>
