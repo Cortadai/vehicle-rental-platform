@@ -1558,3 +1558,117 @@ payment-service/payment-domain/src/main/java/com/vehiclerental/payment/domain/
 ### Siguiente paso
 
 **payment-application** — la capa de aplicacion del Payment Service. Use cases para procesar pagos, consultar estado, y manejar reembolsos. Replica el patron de Customer/Fleet/Reservation application con commands, DTOs, input/output ports, y mapper manual.
+
+---
+
+## Fecha: 2026-02-21
+
+## Decimocuarto Ciclo: Payment Application — El PaymentGateway y la Copia Defensiva
+
+### Contexto
+
+Con el dominio de Payment completo (51 tests, 4 estados, 3 transiciones), la capa de aplicacion es el segundo paso antes de la infraestructura. Customer-application (17 tests), fleet-application (17 tests) y reservation-application (18 tests) ya establecieron el patron: input ports ISP, commands con primitivos, un Application Service con `@Transactional`, mapper manual, NotFoundException. Payment replica este patron pero introduce una diferencia fundamental: un **PaymentGateway output port** para delegar el procesamiento de cobros a un sistema externo. Customer y Fleet son deterministas — `suspend()` siempre funciona si el estado es valido. Payment depende de un procesador de pagos cuyo resultado es no-deterministico.
+
+### Que construimos
+
+**1 POM + 12 clases Java + 3 clases de test = 18 tests pasando**
+
+```
+payment-service/payment-application/src/main/java/com/vehiclerental/payment/application/
+├── port/
+│   ├── input/
+│   │   ├── ProcessPaymentUseCase.java          ← Input port: crear + cobrar
+│   │   ├── RefundPaymentUseCase.java           ← Input port: reembolsar (compensacion SAGA)
+│   │   └── GetPaymentUseCase.java              ← Input port: consultar estado
+│   └── output/
+│       ├── PaymentDomainEventPublisher.java     ← Output port: publicar eventos de dominio
+│       ├── PaymentGateway.java                  ← Output port: delegar cobro a sistema externo
+│       └── PaymentGatewayResult.java            ← Record: resultado del cobro (success + failureMessages)
+├── dto/
+│   ├── command/
+│   │   ├── ProcessPaymentCommand.java          ← (reservationId, customerId, amount, currency)
+│   │   ├── RefundPaymentCommand.java           ← (reservationId — no paymentId)
+│   │   └── GetPaymentCommand.java              ← (paymentId)
+│   └── response/
+│       └── PaymentResponse.java                ← Unico response para los 3 use cases (9 campos)
+├── service/
+│   └── PaymentApplicationService.java          ← Orquestador: idempotencia + gateway + save + publish
+├── mapper/
+│   └── PaymentApplicationMapper.java           ← Manual, 9 campos, sin Spring
+└── exception/
+    └── PaymentNotFoundException.java           ← RuntimeException, no DomainException
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: PaymentGateway output port — la diferencia clave vs Customer/Fleet/Reservation
+
+- Customer y Fleet no tienen ports de salida mas alla de repositorio y event publisher. Sus operaciones son deterministas.
+- Payment necesita un seam para un sistema externo (procesador de pagos). Sin el gateway port, el Application Service siempre llamaria a `complete()` sin poder testear la ruta de `fail()`.
+- **Alternativa rechazada**: flag `simulateFailure` en ProcessPaymentCommand. Contamina el contrato de aplicacion con concerns de testing.
+- **Leccion**: Cuando la operacion depende de un resultado externo no-deterministico, la solucion hexagonal es un port de salida. El Application Service depende de una abstraccion; la implementacion (simulada, Stripe, stub de test) se inyecta en infraestructura/container.
+
+#### Decision 2: PaymentGatewayResult como record, no boolean
+
+- `PaymentGatewayResult(boolean success, List<String> failureMessages)` — lleva tanto el resultado como las razones de fallo.
+- El dominio exige `fail(List<String> failureMessages)`, asi que el gateway debe devolver esos mensajes. Un boolean no alcanza.
+- **Leccion**: Cuando el consumidor necesita mas que un si/no, el tipo de retorno del port debe reflejar esa riqueza. Un record con campos explícitos es mas seguro que un boolean + metodo estateful.
+
+#### Decision 3: Idempotencia — retorno status-agnostic con nota sobre FAILED
+
+- `findByReservationId` antes de `create()`. Si existe un pago (en cualquier estado: COMPLETED, FAILED, REFUNDED), se retorna tal cual sin reintentar.
+- Un pago FAILED no se reintenta porque la SAGA crea una nueva reservacion (con nuevo reservationId) para reintentos, no reusa la misma.
+- **Leccion**: La idempotencia debe documentar explicitamente que pasa con estados terminales no-exitosos. "Retorna el existente" suena simple, pero "retorna un FAILED sin reintentar" tiene implicaciones que dependen del flujo de la SAGA.
+
+#### Decision 4: RefundPaymentCommand con reservationId, no paymentId
+
+- La SAGA sabe que reservacion disparo la compensacion, pero no necesariamente rastrea el paymentId interno.
+- Buscar por reservationId alinea el refund con el flujo de compensacion: "reembolsa el pago de la reservacion X".
+- **Leccion**: El key de lookup en un command de compensacion debe ser el identificador que el orquestador conoce naturalmente, no el ID interno del aggregate.
+
+#### Decision 5: List.copyOf() en publish — la copia defensiva
+
+- `AggregateRoot.getDomainEvents()` retorna un `Collections.unmodifiableList()` — una **vista** sobre la lista interna, NO una copia.
+- El patron `publish(events) → clearDomainEvents()` parece correcto, pero `clearDomainEvents()` limpia la lista subyacente, y cualquier referencia a la vista (incluida la que captura `ArgumentCaptor` en tests) ve una lista vacia.
+- Fix: `eventPublisher.publish(List.copyOf(payment.getDomainEvents()))` — copia defensiva antes de clear.
+- Customer/Fleet/Reservation pasan la vista directamente y funciona porque sus tests no capturan ni inspeccionan el contenido de la lista con ArgumentCaptor. Payment si lo necesita (para verificar PaymentCompletedEvent vs PaymentFailedEvent segun el resultado del gateway).
+- **Leccion**: `Collections.unmodifiableList()` protege contra escritura pero no contra vaciado del backing list. Cuando la secuencia es publish → clear, y alguien necesita inspeccionar lo que se publico, la copia defensiva es obligatoria.
+
+### Tests: 18 tests en 3 clases
+
+| Clase de test | Tests | Que cubre |
+|--------------|-------|-----------|
+| PaymentNotFoundExceptionTest | 3 | Mensaje contiene identifier, extends RuntimeException, no extends PaymentDomainException |
+| PaymentApplicationMapperTest | 3 | Mapeo completo (9 campos), failureMessages para FAILED, lista vacia (no null) para non-FAILED |
+| PaymentApplicationServiceTest | 12 | ProcessPayment: charge succeeds → COMPLETED + evento, charge fails → FAILED + evento, idempotente retorna existente, eventos del aggregate original (no del save), orden save→publish; RefundPayment: happy path → REFUNDED + evento, not found; GetPayment: happy path, not found; Annotations: no @Service/@Component, @Transactional en writes, readOnly en get |
+
+### Verificacion Final
+
+- **18 tests, 0 fallos** — cuarta capa de aplicacion de la plataforma.
+- **Zero `@Service`/`@Component`/`@Autowired`** en main sources — confirmado via grep.
+- **Unica dependencia Spring**: `org.springframework.transaction.annotation.Transactional` (spring-tx).
+- **BUILD SUCCESS** en `mvn clean install` desde root — los 17 modulos compilan.
+
+### Diferencias vs las otras application layers
+
+| Aspecto | Customer / Fleet | Reservation | Payment |
+|---------|-----------------|-------------|---------|
+| Use cases | 5 (CRUD + lifecycle) | 2 (create + track) | 3 (process + refund + get) |
+| Output ports extra | Ninguno | Ninguno | PaymentGateway + PaymentGatewayResult |
+| Idempotencia | No | Si (trackingId) | Si (reservationId, status-agnostic) |
+| Lookup de compensacion | N/A | N/A | Por reservationId (no paymentId) |
+| Response types | 1 (CustomerResponse/VehicleResponse) | 2 (Create vs Track) | 1 (PaymentResponse para todo) |
+| Tests | 17 | 18 | 18 |
+| Notable | Patron base | Items en create | Gateway routing + copia defensiva |
+
+### Reflexiones del decimocuarto ciclo
+
+- **El PaymentGateway es la primera adicion arquitectural genuina a la capa de aplicacion**: Los tres servicios anteriores siguen exactamente el mismo patron (repository + event publisher). Payment rompe esa simetria con un tercer output port que introduce una dependencia nueva para mockear en tests y un bean nuevo para wiring en container. No es boilerplate — es una necesidad real del dominio.
+- **La copia defensiva revelo un subtlety en AggregateRoot**: `Collections.unmodifiableList()` no es lo mismo que `List.copyOf()`. El primero es una vista read-only del backing list; el segundo es un snapshot independiente. Para el patron publish → clear, la vista esta bien si nadie inspecciona el contenido despues del clear. Pero tests con ArgumentCaptor si lo hacen, y ahi la vista falla silenciosamente (lista vacia, no excepcion). `List.copyOf()` es la version segura.
+- **La idempotencia status-agnostic necesita documentacion explicita**: "Retorna el existente" parece claro, pero cuando "el existente" es FAILED, la pregunta es: ¿deberia reintentar? La respuesta depende del flujo de la SAGA (no reintenta el mismo reservationId), no del Application Service. Documentar esta relacion evita bugs futuros si la SAGA evoluciona.
+- **18 tests para 3 use cases es un conteo razonable**: Customer y Fleet tienen 17 tests para 5 use cases (mas simples). Payment tiene 18 tests para 3 use cases porque ProcessPayment tiene mas variantes (charge succeeds, charge fails, idempotente, eventos del original, orden de operaciones). El conteo refleja la complejidad, no el numero de use cases.
+- **Cuatro application layers completas — el patron esta consolidado**: El flujo command → convert → domain method → save → publish(List.copyOf) → clear → response es identico en los 4 servicios. La unica variable es cuantos output ports necesita cada uno.
+
+### Siguiente paso
+
+**payment-infrastructure-and-container** — JPA entities, mappers JPA, REST controllers, Flyway migrations, Spring Boot configuration, y el SimulatedPaymentGateway que siempre retorna success. El ultimo change antes de la SAGA Orchestration.
