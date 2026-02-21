@@ -1452,4 +1452,109 @@ common-messaging/  ← outbox pattern, Spring JPA + AMQP
 
 ### Siguiente paso
 
-**payment-walking-skeleton** — el cuarto y ultimo microservicio. Replica el patron hexagonal consolidado en Customer y Fleet: domain con aggregate Payment, application con use cases, infrastructure con JPA/REST, container con Testcontainers. Es el change mas mecanico del proyecto porque el patron ya esta establecido y documentado. Despues de Payment, viene la SAGA Orchestration que conecta los 4 servicios.
+**payment-domain** — la capa de dominio del cuarto y ultimo microservicio. Comienza con el agregado Payment, value objects tipados, domain events y el port de repositorio.
+
+---
+
+## Fecha: 2026-02-21
+
+## Decimotercer Ciclo: Payment Domain — El Cuarto Bounded Context, el Mas Simple y el Mas Directo
+
+### Contexto
+
+Con tres servicios completos (Customer, Fleet, Reservation) y el Outbox Pattern funcionando, el cuarto bounded context es el ultimo antes de la SAGA Orchestration. Payment es estructuralmente el mas simple de los cuatro dominios: agregado plano (sin inner entities como Reservation), 4 estados con transiciones asimetricas (como Customer/Fleet pero sin bidireccionalidad), y 3 domain events (uno por transicion). Es el change mas mecanico del proyecto porque todos los patrones ya estan consolidados — pero introduce un concepto nuevo: **transiciones asimetricas y finales** donde cada camino es one-way.
+
+### Que construimos
+
+**1 POM + 8 clases Java + 7 clases de test = 51 tests pasando**
+
+```
+payment-service/payment-domain/src/main/java/com/vehiclerental/payment/domain/
+├── model/
+│   ├── aggregate/
+│   │   └── Payment.java                     ← Aggregate Root (create/reconstruct, complete/fail/refund)
+│   └── vo/
+│       ├── PaymentId.java                   ← Typed ID (record, UUID)
+│       ├── ReservationId.java               ← Cross-context ID, local al bounded context
+│       ├── CustomerId.java                  ← Cross-context ID, local al bounded context
+│       └── PaymentStatus.java               ← Enum: PENDING, COMPLETED, FAILED, REFUNDED
+├── event/
+│   ├── PaymentCompletedEvent.java           ← Record con snapshot completo (paymentId, reservationId, customerId, amount)
+│   ├── PaymentFailedEvent.java              ← Record con failureMessages
+│   └── PaymentRefundedEvent.java            ← Record con amount refundado
+├── exception/
+│   └── PaymentDomainException.java          ← Extiende DomainException del common
+└── port/
+    └── output/
+        └── PaymentRepository.java           ← Interface (save, findById, findByReservationId)
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: Transiciones asimetricas y finales — ni bidireccionales ni lineales
+- Customer/Fleet tienen transiciones bidireccionales (`suspend ↔ activate`). Reservation tiene una maquina lineal con branch (`PENDING → ... → CONFIRMED` + `CANCELLING → CANCELLED`).
+- Payment tiene **tres caminos one-way desde dos origenes**: `PENDING → COMPLETED`, `PENDING → FAILED`, `COMPLETED → REFUNDED`. Ningun estado terminal tiene salida.
+- **Leccion**: Cada dominio tiene su propia topologia de estados. No hay un patron unico. Lo que se comparte es el mecanismo (validar estado fuente, actualizar, registrar evento), no la forma.
+
+#### Decision 2: No hay evento en create() — PENDING no es un hecho de negocio
+- Customer emite `CustomerCreatedEvent` en `create()`. Reservation emite `ReservationCreatedEvent` en `create()`. Payment NO emite nada.
+- Un Payment en PENDING es una instruccion del orquestador SAGA ("prepara un cobro"), no un resultado de negocio. Los eventos relevantes son los resultados: completado, fallido, reembolsado.
+- **Leccion**: La pregunta correcta para decidir si emitir un evento en create() es: "¿Le importa al mundo exterior que esto exista en estado inicial?" Para Customer y Reservation, si. Para Payment, no — el mundo exterior se entera cuando el pago se resuelve.
+
+#### Decision 3: failureMessages en fail() — mismo patron que Reservation
+- `fail(List<String> failureMessages)` replica el patron de `Reservation.initCancel(List<String>)`.
+- Los mensajes vienen de la capa de aplicacion (gateway simulado) y se propagan en el `PaymentFailedEvent` para diagnostico.
+- Null y lista vacia se rechazan con `PAYMENT_FAILURE_MESSAGES_REQUIRED`.
+- **Leccion**: Una vez que un patron funciona (failureMessages como `List<String>` con validacion), reutilizarlo sin variacion. La consistencia entre bounded contexts facilita el mantenimiento.
+
+#### Decision 4: Money reutilizado de common, sin wrapper
+- Fleet tiene `DailyRate` wrapping `Money` porque añade una restriccion de negocio ("estrictamente positivo") y participa en calculos (`dailyRate × days = subtotal`).
+- Payment usa `Money` directamente. La unica validacion ("positivo") se hace en `create()`, no justifica un tipo separado.
+- **Leccion**: Los wrappers de value objects se justifican cuando añaden invariantes o operaciones propias. Si solo validas en un punto, la validacion inline es suficiente.
+
+#### Decision 5: findByReservationId para idempotencia en capa de aplicacion
+- `PaymentRepository` expone `findByReservationId(ReservationId)` ademas de `findById(PaymentId)`.
+- La idempotencia (no procesar dos pagos por la misma reserva) no es una regla del agregado — es una regla de orquestacion que el Application Service implementara llamando `findByReservationId` antes de `create()`.
+- **Leccion**: El dominio provee la interfaz del port; la logica de orquestacion vive en la capa de aplicacion. El agregado no conoce el concepto de "ya existe un pago para esta reserva".
+
+### Tests: 51 tests en 7 clases
+
+| Clase de test | Tests | Que cubre |
+|--------------|-------|-----------|
+| PaymentTest | 9 | Creacion, validacion de nulos y amount zero, reconstruct, no public constructors |
+| PaymentLifecycleTest | 14 | complete/fail/refund desde cada estado, validacion de failureMessages |
+| PaymentDomainEventsTest | 15 | 3 eventos: campos accesibles, null eventId/occurredOn, DomainEvent impl, isRecord |
+| PaymentDomainExceptionTest | 4 | errorCode, message, constructor con cause, extends DomainException |
+| PaymentIdTest | 3 | Construccion, rechazo de null, igualdad |
+| ReservationIdTest | 3 | Construccion, rechazo de null, igualdad |
+| CustomerIdTest | 3 | Construccion, rechazo de null, igualdad |
+
+### Verificacion Final
+
+- **51 tests, 0 fallos** — cuarto dominio de la plataforma.
+- **Zero Spring imports** en `payment-service/payment-domain/src/main/` — confirmado.
+- **Zero cross-domain imports** — ni `com.vehiclerental.customer`, ni `fleet`, ni `reservation`.
+- **BUILD SUCCESS** en `mvn clean install` desde root — los 16 modulos compilan.
+
+### Diferencias vs los otros dominios
+
+| Aspecto | Customer / Fleet | Reservation | Payment |
+|---------|-----------------|-------------|---------|
+| Maquina de estados | 3 estados, bidireccional | 6 estados, lineal + branch | 4 estados, asimetrico y final |
+| Inner entities | Ninguna | ReservationItem | Ninguna |
+| IDs cross-context | Solo su propio typed ID | CustomerId + VehicleId | ReservationId + CustomerId |
+| Repository port | findById | findById + findByTrackingId | findById + findByReservationId |
+| Domain events | Evento en create() | Evento en create() + cancel() | Solo en transiciones (no en create) |
+| failureMessages | No | Si (initCancel) | Si (fail) |
+| Tests | 50-58 | 80 | 51 |
+
+### Reflexiones del decimotercer ciclo
+
+- **El cuarto dominio confirma que el patron esta maduro**: Payment se implemento de principio a fin sin sorpresas arquitecturales. El shared kernel (`AggregateRoot`, `DomainEvent`, `DomainException`, `Money`) funciona sin modificaciones para un cuarto consumidor. El patron de typed IDs como records, factory methods `create()`/`reconstruct()`, transiciones que validan estado fuente — todo se replica sin friccion.
+- **La ausencia de evento en create() es una decision de diseño, no una omision**: Las tres decisiones de "emitir o no en create" (Customer: si, Reservation: si, Payment: no) muestran que no hay una regla universal. Depende de si el estado inicial es un hecho de negocio relevante para el mundo exterior.
+- **51 tests para un dominio simple es el rango correcto**: Customer (58) y Fleet (50) son comparables. Reservation (80) fue mas grande por inner entities y 6 estados. Payment con 51 tests cubre exhaustivamente las 3 transiciones con sus 4 estados fuente cada una, los 3 eventos, y las validaciones.
+- **Todos los dominios completos — listo para SAGA**: Con los 4 bounded contexts implementados (Customer, Fleet, Reservation, Payment), el siguiente paso es la capa de aplicacion de Payment y luego la SAGA Orchestration que los conecta.
+
+### Siguiente paso
+
+**payment-application** — la capa de aplicacion del Payment Service. Use cases para procesar pagos, consultar estado, y manejar reembolsos. Replica el patron de Customer/Fleet/Reservation application con commands, DTOs, input/output ports, y mapper manual.
