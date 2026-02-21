@@ -64,6 +64,46 @@ When modifying Maven POMs: ALWAYS read docs/07 before editing.
 
 
 
+## Lessons Learned (from reservation-outbox-and-messaging)
+
+### Cross-module JPA scanning
+When a service imports `common-messaging`, Spring Boot does NOT auto-detect entities and repositories outside the service's base package. The service's main class MUST have all three:
+```java
+@SpringBootApplication(scanBasePackages = "com.vehiclerental")
+@EntityScan(basePackages = "com.vehiclerental")
+@EnableJpaRepositories(basePackages = "com.vehiclerental")
+```
+
+`scanBasePackages` alone is NOT enough — `@EntityScan` and `@EnableJpaRepositories` have their own independent scanning.
+
+### All ITs need RabbitMQ after adding messaging
+
+Once `common-messaging` is on the classpath, `OutboxPublisher` requires `RabbitTemplate`, which requires a RabbitMQ connection. ALL `@SpringBootTest` ITs in that service must declare a RabbitMQ Testcontainer:
+
+```java
+@Container
+@ServiceConnection
+static RabbitMQContainer rabbitMQContainer = new RabbitMQContainer("rabbitmq:3.13-management-alpine");
+```
+
+Consider extracting a `BaseIT` class to avoid repeating this in every IT.
+
+### Domain events are transient — publish from ORIGINAL aggregate
+
+`reservationRepository.save(entity)` returns a NEW domain object reconstructed from JPA. Domain events do NOT survive the domain→JPA→domain mapper round-trip. Always publish from the ORIGINAL aggregate:
+
+```java
+// CORRECT
+Reservation savedReservation = reservationRepository.save(reservation);
+eventPublisher.publish(reservation.getDomainEvents());     // original
+reservation.clearDomainEvents();                            // original
+
+// WRONG — savedReservation has empty events
+eventPublisher.publish(savedReservation.getDomainEvents());
+```
+
+This applies to ALL services: Reservation, Customer, Fleet, Payment.
+
 ## Build & Run
 
 ```bash
@@ -77,7 +117,7 @@ mvn test
 mvn verify
 
 # Start infrastructure (PostgreSQL + RabbitMQ)
-docker-compose up -d
+docker compose --profile infra up -d
 
 # Run a specific service
 cd reservation-service/reservation-container

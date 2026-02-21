@@ -58,8 +58,8 @@ public class ReservationApplicationService implements CreateReservationUseCase, 
         Reservation reservation = Reservation.create(customerId, pickupLocation, returnLocation, dateRange, items);
 
         Reservation savedReservation = reservationRepository.save(reservation);
-        eventPublisher.publish(savedReservation.getDomainEvents());
-        savedReservation.clearDomainEvents();
+        eventPublisher.publish(reservation.getDomainEvents());
+        reservation.clearDomainEvents();
 
         return mapper.toCreateResponse(savedReservation);
     }

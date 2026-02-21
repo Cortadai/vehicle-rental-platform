@@ -48,8 +48,8 @@ public class FleetApplicationService implements
         Vehicle vehicle = Vehicle.create(licensePlate, command.make(), command.model(),
                 command.year(), category, dailyRate, command.description());
         Vehicle savedVehicle = vehicleRepository.save(vehicle);
-        eventPublisher.publish(savedVehicle.getDomainEvents());
-        savedVehicle.clearDomainEvents();
+        eventPublisher.publish(vehicle.getDomainEvents());
+        vehicle.clearDomainEvents();
 
         return mapper.toResponse(savedVehicle);
     }

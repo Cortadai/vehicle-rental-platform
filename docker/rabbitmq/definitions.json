@@ -1,0 +1,286 @@
+{
+  "rabbit_version": "3.13.0",
+  "users": [
+    {
+      "name": "guest",
+      "password_hash": "guest",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [
+    {
+      "name": "/"
+    }
+  ],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "reservation.exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "customer.exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "payment.exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "fleet.exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "dlx.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "queues": [
+    {
+      "name": "reservation.created.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "reservation.created.dlq"
+      }
+    },
+    {
+      "name": "reservation.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "customer.validated.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "customer.validated.dlq"
+      }
+    },
+    {
+      "name": "customer.rejected.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "customer.rejected.dlq"
+      }
+    },
+    {
+      "name": "customer.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "payment.completed.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "payment.completed.dlq"
+      }
+    },
+    {
+      "name": "payment.failed.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "payment.failed.dlq"
+      }
+    },
+    {
+      "name": "payment.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
+      "name": "fleet.confirmed.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "fleet.confirmed.dlq"
+      }
+    },
+    {
+      "name": "fleet.rejected.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "fleet.rejected.dlq"
+      }
+    },
+    {
+      "name": "fleet.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "reservation.exchange",
+      "vhost": "/",
+      "destination": "reservation.created.queue",
+      "destination_type": "queue",
+      "routing_key": "reservation.created",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "reservation.dlq",
+      "destination_type": "queue",
+      "routing_key": "reservation.created.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "customer.exchange",
+      "vhost": "/",
+      "destination": "customer.validated.queue",
+      "destination_type": "queue",
+      "routing_key": "customer.validated",
+      "arguments": {}
+    },
+    {
+      "source": "customer.exchange",
+      "vhost": "/",
+      "destination": "customer.rejected.queue",
+      "destination_type": "queue",
+      "routing_key": "customer.rejected",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "customer.dlq",
+      "destination_type": "queue",
+      "routing_key": "customer.validated.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "customer.dlq",
+      "destination_type": "queue",
+      "routing_key": "customer.rejected.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "payment.exchange",
+      "vhost": "/",
+      "destination": "payment.completed.queue",
+      "destination_type": "queue",
+      "routing_key": "payment.completed",
+      "arguments": {}
+    },
+    {
+      "source": "payment.exchange",
+      "vhost": "/",
+      "destination": "payment.failed.queue",
+      "destination_type": "queue",
+      "routing_key": "payment.failed",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "payment.dlq",
+      "destination_type": "queue",
+      "routing_key": "payment.completed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "payment.dlq",
+      "destination_type": "queue",
+      "routing_key": "payment.failed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "fleet.exchange",
+      "vhost": "/",
+      "destination": "fleet.confirmed.queue",
+      "destination_type": "queue",
+      "routing_key": "fleet.confirmed",
+      "arguments": {}
+    },
+    {
+      "source": "fleet.exchange",
+      "vhost": "/",
+      "destination": "fleet.rejected.queue",
+      "destination_type": "queue",
+      "routing_key": "fleet.rejected",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "fleet.dlq",
+      "destination_type": "queue",
+      "routing_key": "fleet.confirmed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "fleet.dlq",
+      "destination_type": "queue",
+      "routing_key": "fleet.rejected.dlq",
+      "arguments": {}
+    }
+  ]
+}

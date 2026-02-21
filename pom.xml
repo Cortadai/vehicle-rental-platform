@@ -27,6 +27,7 @@
     <!-- Design Decision 2: Flat module declaration with path-based references -->
     <modules>
         <module>common</module>
+        <module>common-messaging</module>
         <!-- Customer Service -->
         <module>customer-service/customer-domain</module>
         <module>customer-service/customer-application</module>
@@ -70,6 +71,11 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>common</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>common-messaging</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
             <dependency>

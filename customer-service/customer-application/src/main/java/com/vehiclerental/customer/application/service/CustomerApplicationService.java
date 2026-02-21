@@ -42,8 +42,8 @@ public class CustomerApplicationService implements
 
         Customer customer = Customer.create(command.firstName(), command.lastName(), email, phone);
         Customer savedCustomer = customerRepository.save(customer);
-        eventPublisher.publish(savedCustomer.getDomainEvents());
-        savedCustomer.clearDomainEvents();
+        eventPublisher.publish(customer.getDomainEvents());
+        customer.clearDomainEvents();
 
         return mapper.toResponse(savedCustomer);
     }
