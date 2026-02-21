@@ -55,6 +55,9 @@ node_modules/
 # ===== Notas locales =====
 MEJORAS-PENDIENTES.md
 
+# ===== Serena =====
+.serena/
+
 # ===== Claude Code =====
 # Keep .claude/commands/ and .claude/skills/ (tracked)
 # Ignore session/cache files if any appear
