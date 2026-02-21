@@ -39,6 +39,7 @@
         <module>fleet-service/fleet-container</module>
         <!-- Reservation Service -->
         <module>reservation-service/reservation-domain</module>
+        <module>reservation-service/reservation-application</module>
     </modules>
 
     <!-- ==================== PROPERTIES ==================== -->
@@ -92,6 +93,11 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>reservation-domain</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>reservation-application</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
             <dependency>
