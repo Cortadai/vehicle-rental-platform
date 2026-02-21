@@ -23,12 +23,12 @@ The root POM SHALL use groupId `com.vehiclerental`, artifactId `vehicle-rental-p
 
 ### Requirement: All modules declared
 
-The root POM SHALL declare all platform modules in a `<modules>` section: `common`, `common-messaging`, and for each service (reservation, customer, payment, fleet) its submodules. Customer and Fleet services include `-domain`, `-application`, `-infrastructure`, and `-container` modules following docs/17 four-module pattern. Reservation Service includes the same four-module pattern. Payment Service includes `-domain`, `-infrastructure`, and `-container` modules (payment-application will be added in a future change).
+The root POM SHALL declare all platform modules in a `<modules>` section: `common`, `common-messaging`, and for each service (reservation, customer, payment, fleet) its submodules. Customer and Fleet services include `-domain`, `-application`, `-infrastructure`, and `-container` modules following docs/17 four-module pattern. Reservation Service includes the same four-module pattern. Payment Service includes `-domain`, `-application`, `-infrastructure`, and `-container` modules.
 
 #### Scenario: Module list is complete
 
 - **WHEN** the root `pom.xml` is parsed
-- **THEN** it SHALL declare `common`, `reservation-service/reservation-domain`, `reservation-service/reservation-application`, `reservation-service/reservation-infrastructure`, `reservation-service/reservation-container`, `customer-service/customer-domain`, `customer-service/customer-application`, `customer-service/customer-infrastructure`, `customer-service/customer-container`, `payment-service/payment-domain`, `payment-service/payment-infrastructure`, `payment-service/payment-container`, `fleet-service/fleet-domain`, `fleet-service/fleet-application`, `fleet-service/fleet-infrastructure`, `fleet-service/fleet-container`
+- **THEN** it SHALL declare `common`, `reservation-service/reservation-domain`, `reservation-service/reservation-application`, `reservation-service/reservation-infrastructure`, `reservation-service/reservation-container`, `customer-service/customer-domain`, `customer-service/customer-application`, `customer-service/customer-infrastructure`, `customer-service/customer-container`, `payment-service/payment-domain`, `payment-service/payment-application`, `payment-service/payment-infrastructure`, `payment-service/payment-container`, `fleet-service/fleet-domain`, `fleet-service/fleet-application`, `fleet-service/fleet-infrastructure`, `fleet-service/fleet-container`
 
 #### Scenario: Module list includes reservation-application
 
@@ -234,6 +234,29 @@ The root POM SHALL declare all platform modules in a `<modules>` section: `commo
 
 * **WHEN** the root POM `<dependencyManagement>` is inspected
 * **THEN** it SHALL declare `payment-domain` with `${vehicle-rental.version}`
+
+#### Scenario: Module list includes payment-application
+
+* **WHEN** the root `pom.xml` is parsed
+* **THEN** it SHALL declare `payment-service/payment-application` as a module
+
+#### Scenario: payment-application module directory exists
+
+* **WHEN** the project directory structure is inspected
+* **THEN** `payment-service/payment-application/` SHALL exist with a valid `pom.xml`
+* **AND** the POM SHALL inherit from the root parent POM
+* **AND** the POM SHALL depend on `payment-domain` module
+* **AND** the POM SHALL depend on `spring-tx`
+
+#### Scenario: Module order for payment-application
+
+* **WHEN** the root `pom.xml` is parsed
+* **THEN** `payment-service/payment-application` SHALL appear after `payment-service/payment-domain` and before `payment-service/payment-infrastructure`
+
+#### Scenario: dependencyManagement includes payment-application
+
+* **WHEN** the root POM `<dependencyManagement>` is inspected
+* **THEN** it SHALL declare `payment-application` with `${vehicle-rental.version}`
 
 ### Requirement: Java 21 configuration
 The root POM SHALL configure Java 21 as the source, target, and release version with `-parameters` compiler flag for method parameter name retention.
