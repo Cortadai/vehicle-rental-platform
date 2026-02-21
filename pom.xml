@@ -40,6 +40,8 @@
         <!-- Reservation Service -->
         <module>reservation-service/reservation-domain</module>
         <module>reservation-service/reservation-application</module>
+        <module>reservation-service/reservation-infrastructure</module>
+        <module>reservation-service/reservation-container</module>
     </modules>
 
     <!-- ==================== PROPERTIES ==================== -->
@@ -98,6 +100,16 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>reservation-application</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>reservation-infrastructure</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>reservation-container</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
             <dependency>
