@@ -135,6 +135,16 @@
       }
     },
     {
+      "name": "payment.refunded.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "payment.refunded.dlq"
+      }
+    },
+    {
       "name": "payment.dlq",
       "vhost": "/",
       "durable": true,
@@ -248,6 +258,22 @@
       "destination": "payment.dlq",
       "destination_type": "queue",
       "routing_key": "payment.failed.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "payment.exchange",
+      "vhost": "/",
+      "destination": "payment.refunded.queue",
+      "destination_type": "queue",
+      "routing_key": "payment.refunded",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "payment.dlq",
+      "destination_type": "queue",
+      "routing_key": "payment.refunded.dlq",
       "arguments": {}
     },
     {

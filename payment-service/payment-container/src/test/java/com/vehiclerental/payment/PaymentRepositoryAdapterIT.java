@@ -9,7 +9,10 @@ import com.vehiclerental.payment.domain.port.output.PaymentRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.ActiveProfiles;
+import org.testcontainers.containers.RabbitMQContainer;
+import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
@@ -26,6 +29,10 @@ import static org.assertj.core.api.Assertions.within;
 @ActiveProfiles("test")
 @Testcontainers
 class PaymentRepositoryAdapterIT {
+
+    @Container
+    @ServiceConnection
+    static RabbitMQContainer rabbitMQContainer = new RabbitMQContainer("rabbitmq:3.13-management-alpine");
 
     @Autowired
     private PaymentRepository paymentRepository;
