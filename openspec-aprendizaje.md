@@ -1672,3 +1672,164 @@ payment-service/payment-application/src/main/java/com/vehiclerental/payment/appl
 ### Siguiente paso
 
 **payment-infrastructure-and-container** — JPA entities, mappers JPA, REST controllers, Flyway migrations, Spring Boot configuration, y el SimulatedPaymentGateway que siempre retorna success. El ultimo change antes de la SAGA Orchestration.
+
+---
+
+## Fecha: 2026-02-22
+
+## Decimoquinto Ciclo: Payment Infrastructure + Container — El Cuarto Microservicio y el Primer Gateway Externo
+
+### Contexto
+
+Con el dominio (51 tests) y la aplicacion (18 tests) completos, Payment necesitaba las dos capas externas para convertirse en microservicio funcional. Customer (ciclo 5, 25 tareas) y Fleet (ciclo 8, 27 tareas) ya establecieron el patron de infrastructure+container. Payment replica ese patron pero introduce dos novedades: (1) un **SimulatedPaymentGateway**, el primer adaptador de sistema externo en toda la plataforma — Customer y Fleet solo tienen persistence + event publisher, (2) un **PaymentPersistenceMapper como @Component** con ObjectMapper inyectado, rompiendo el patron de mapper POJO plano de Customer/Fleet porque `failureMessages` requiere serializacion JSON.
+
+### Que construimos
+
+**2 POMs + ~16 ficheros Java + 1 SQL + 2 YMLs + 3 clases de test = 13 tests de integracion pasando**
+
+```
+payment-service/payment-infrastructure/src/main/java/com/vehiclerental/payment/infrastructure/
+├── adapter/
+│   ├── input/
+│   │   └── rest/
+│   │       ├── PaymentController.java              ← @RestController, inyecta 3 input ports
+│   │       └── dto/
+│   │           ├── ProcessPaymentRequest.java       ← record con @NotBlank, @NotNull
+│   │           └── RefundPaymentRequest.java        ← record con @NotBlank
+│   └── output/
+│       ├── persistence/
+│       │   ├── PaymentJpaRepository.java            ← JpaRepository + findByReservationId
+│       │   ├── PaymentRepositoryAdapter.java        ← @Component, implementa PaymentRepository
+│       │   ├── entity/
+│       │   │   └── PaymentJpaEntity.java            ← @Entity, separada del dominio
+│       │   └── mapper/
+│       │       └── PaymentPersistenceMapper.java    ← @Component con ObjectMapper (JSON)
+│       ├── event/
+│       │   └── PaymentDomainEventPublisherAdapter.java ← Logger no-op
+│       └── gateway/
+│           └── SimulatedPaymentGateway.java         ← @Component, siempre retorna success
+└── config/
+    └── GlobalExceptionHandler.java                  ← @RestControllerAdvice, 422 con errorCode
+
+payment-service/payment-container/src/main/java/com/vehiclerental/payment/
+├── PaymentServiceApplication.java                   ← @SpringBootApplication
+└── config/
+    └── BeanConfiguration.java                       ← @Configuration, 4 output ports + 3 input ports
+
+payment-service/payment-container/src/main/resources/
+├── application.yml                                  ← PostgreSQL, Flyway, puerto 8184
+├── application-test.yml                             ← Testcontainers + flyway.default-schema: public
+└── db/migration/
+    └── V1__create_payments_table.sql                ← reservation_id UNIQUE
+```
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: PaymentPersistenceMapper como @Component — rompe el patron de Customer/Fleet
+
+- Customer y Fleet usan mappers de persistencia como POJOs planos (sin anotaciones Spring). El mapper solo hace `new Entity()` y setters.
+- Payment necesita serializar `List<String> failureMessages` a JSON (TEXT column) y deserializar de vuelta. Eso requiere `ObjectMapper`.
+- Inyectar `ObjectMapper` via constructor convierte el mapper en un bean Spring (`@Component`), no un POJO instanciable manualmente.
+- **Consecuencia en BeanConfiguration**: En Customer/Fleet, `BeanConfiguration` crea el mapper con `new CustomerPersistenceMapper()`. En Payment, el mapper ya es un `@Component` detectado por component scan — no se registra manualmente.
+- **Alternativa rechazada**: Crear `ObjectMapper` internamente con `new ObjectMapper()`. Funciona pero ignora la configuracion global de Jackson de Spring Boot (date formats, naming strategy, modules registrados).
+- **Leccion**: Cuando un mapper necesita una dependencia de infraestructura (ObjectMapper, Clock, etc.), la conversion a @Component es la solucion idiomatica en Spring. Es un trade-off aceptable: se pierde la simetria con los otros mappers pero se gana configuracion consistente.
+
+#### Decision 2: failureMessages como TEXT + JSON — la serializacion pragmatica
+
+- El dominio modela `failureMessages` como `List<String>`. La base de datos necesita persistirla.
+- **Opcion A**: Tabla separada `payment_failure_messages` con FK. Correcto en 3NF pero overkill — solo se lee junto al pago, nunca se consulta independientemente.
+- **Opcion B**: Array de PostgreSQL (`TEXT[]`). Elegante pero con soporte limitado en JPA y problemas de portabilidad.
+- **Opcion C (elegida)**: Columna `TEXT` nullable con JSON serializado. `["insufficient_funds", "card_declined"]` o `null` si la lista esta vacia.
+- `PaymentPersistenceMapper` maneja la serializacion: `List<String>` → JSON string (o null si vacia), JSON string → `List<String>` (o `List.of()` si null).
+- **Leccion**: No todo necesita su propia tabla. Si el dato siempre se lee y escribe junto al aggregate, una columna JSON es mas simple y suficiente.
+
+#### Decision 3: SimulatedPaymentGateway — el primer adaptador de sistema externo
+
+- Customer y Fleet solo tienen dos tipos de adaptadores de salida: persistencia y event publisher. Payment añade un tercero: gateway de pagos.
+- `SimulatedPaymentGateway` implementa `PaymentGateway` (output port de aplicacion) y siempre retorna `new PaymentGatewayResult(true, List.of())`.
+- Loguea el intento de cobro (monto y moneda) con SLF4J a nivel INFO antes de retornar.
+- **Leccion**: En un POC, un adaptador simulado que siempre retorna success es correcto. Demuestra el seam arquitectural (la aplicacion no sabe si es Stripe o un stub) sin acoplar a un SDK externo. Cuando se integre Stripe, solo se reemplaza esta clase — el Application Service no cambia.
+
+#### Decision 4: GlobalExceptionHandler con errorCode para PaymentDomainException
+
+- Customer/Fleet mapean `DomainException` → 422 con solo `message`. Payment añade `errorCode` al response body porque `PaymentDomainException` expone un codigo como `INVALID_PAYMENT_STATE`.
+- El error code permite al cliente (o la SAGA) distinguir entre tipos de fallo sin parsear mensajes de texto.
+- **Leccion**: Cuando el dominio tiene excepciones con codigos estructurados, el exception handler debe exponerlos. Un mensaje legible para humanos no es suficiente para orquestacion automatizada.
+
+#### Decision 5: BeanConfiguration con 4 dependencias — el wiring mas complejo
+
+- Customer/Fleet `BeanConfiguration` inyecta: repository + event publisher + mapper = 3 dependencias para el ApplicationService.
+- Payment `BeanConfiguration` inyecta: repository + event publisher + **gateway** + mapper = 4 dependencias.
+- Los 3 input ports (ProcessPaymentUseCase, RefundPaymentUseCase, GetPaymentUseCase) apuntan al mismo `PaymentApplicationService`, igual que en Customer/Fleet.
+- **Leccion**: Cada output port nuevo es una dependencia mas en BeanConfiguration. Es el coste visible del hexagono — pero tambien su beneficio: cada dependencia es explicita y testeable independientemente.
+
+### Errores y Soluciones Durante el Apply
+
+#### Error 1: Constructor `protected` en PaymentJpaEntity (error repetido del ciclo 5)
+
+- **Exactamente el mismo error que en Customer** (ciclo 5, Error 1): el mapper esta en `adapter.output.persistence.mapper`, la entidad JPA en `adapter.output.persistence.entity` — paquetes diferentes. Constructor `protected` no es accesible.
+- **Solucion**: Cambiar a constructor `public`.
+- **Reflexion**: Este error se documento en el ciclo 5 y se repitio aqui porque el design lo volvio a especificar como "protected" siguiendo la convencion JPA. La leccion del ciclo 5 no se propago al template de diseño. Deberia ser una regla permanente: "constructor publico cuando mapper y entidad estan en paquetes separados".
+
+#### Error 2: Flyway `default-schema: payment` rompe Testcontainers (error nuevo)
+
+- `application.yml` configura `spring.flyway.default-schema: payment` para que en Docker Compose (donde todos los servicios comparten un PostgreSQL) cada servicio tenga su propio schema.
+- En tests con Testcontainers, Flyway crea la tabla `payments` en el schema `payment`, pero Hibernate `ddl-auto: validate` busca en el schema `public` → `Schema-validation: missing table [payments]`.
+- Customer y Fleet no tienen `default-schema` en su application.yml, por eso nunca tuvieron este problema.
+- **Solucion**: Añadir `spring.flyway.default-schema: public` en `application-test.yml` para que en tests Flyway cree las tablas en `public` (donde Hibernate las espera).
+- **Leccion**: Flyway `default-schema` y Hibernate `default_schema` son configuraciones independientes. Si Flyway crea tablas en un schema custom pero Hibernate no sabe de ese schema, la validacion falla. En tests unitarios donde no hay schema custom, el override a `public` es la solucion correcta.
+
+### Verificacion Final
+
+- **13 tests de integracion, 0 fallos**:
+  - `PaymentRepositoryAdapterIT` — 6 tests (round-trip save/findById, findById vacio, findByReservationId, findByReservationId vacio, failureMessages JSON serialization, unique constraint en reservationId)
+  - `PaymentControllerIT` — 6 tests (POST 201, GET 200, GET 404, POST refund 200, validacion 400, domain exception 422)
+  - `PaymentServiceApplicationIT` — 1 test (smoke test de arranque de contexto)
+- **Domain y application siguen compilando** — BUILD SUCCESS, 69 tests previos (51 domain + 18 application) intactos.
+- **Zero `@Service`/`@Component`** en domain y application `src/main/` — confirmado via grep.
+- **Payment Service es ahora un microservicio funcional** — arranca en el puerto 8184, persiste en PostgreSQL, expone REST API con 3 endpoints.
+
+### El Payment Service Completo: 4 Modulos Hexagonales
+
+Con este change, el Payment Service tiene los 4 modulos que prescribe la arquitectura:
+
+```
+payment-service/
+├── payment-domain/          ← 15 clases, 51 tests unitarios, ZERO Spring
+├── payment-application/     ← 12 clases, 18 tests unitarios, solo spring-tx
+├── payment-infrastructure/  ← ~11 clases, @Component/@RestController/@Entity
+└── payment-container/       ← 2 clases + config, @SpringBootApplication
+```
+
+**Cadena de dependencias** (unidireccional):
+```
+container → infrastructure → application → domain → common
+```
+
+### Diferencias vs las otras capas de infraestructura
+
+| Aspecto | Customer (ciclo 5) | Fleet (ciclo 8) | Payment (este ciclo) |
+|---------|-------------------|-----------------|---------------------|
+| Tareas | 25 | 27 | 27 |
+| ITs | 11 | 11 | 13 |
+| Input endpoints | 5 (CRUD + lifecycle) | 5 (CRUD + lifecycle) | 3 (process + refund + get) |
+| Output adapters | 2 (persistence + event) | 2 (persistence + event) | 3 (persistence + event + **gateway**) |
+| Persistence mapper | POJO plano | POJO plano | **@Component con ObjectMapper** |
+| Puerto | 8181 | 8183 | 8184 |
+| Flyway default-schema | No | No | **Si (payment)** |
+| GlobalExceptionHandler | message only | message only | **message + errorCode** |
+| Notable | Patron base | Replica del patron | Gateway externo + JSON serialization |
+
+### Reflexiones del decimoquinto ciclo
+
+- **El cuarto microservicio confirma que el patron esta consolidado**: El 90% del codigo de infrastructure+container es boilerplate estructural que se replica de Customer/Fleet. Las unicas partes nuevas son el SimulatedPaymentGateway y el PaymentPersistenceMapper con ObjectMapper. Esto valida que la arquitectura hexagonal de 4 modulos es un patron repetible y predecible.
+- **El SimulatedPaymentGateway es trivial pero arquitecturalmente significativo**: 5 lineas de logica (log + return success), pero demuestra el tercer tipo de adaptador de salida. Cuando se integre Stripe o PayPal, solo se reemplaza esta clase. El Application Service, el dominio, los tests de aplicacion — nada cambia. Esa es la promesa del hexagono cumplida.
+- **El error del constructor `protected` se repitio — necesita convertirse en regla**: Documentar un error en el journal no es suficiente si el design template lo vuelve a generar. La regla "constructor publico cuando mapper y entidad estan en paquetes separados" deberia estar en los docs de best practices o en el project.md, no solo en el journal.
+- **Flyway `default-schema` es una trampa sutil para Testcontainers**: Es el primer error genuinamente nuevo en 4 ciclos de infrastructure+container. Customer y Fleet no lo tuvieron porque no usan schema separation. Payment lo necesita para Docker Compose (base compartida). La solucion (override en application-test.yml) es simple, pero el error es dificil de diagnosticar: Flyway no falla, Hibernate falla con "missing table" sin mencionar que busco en el schema equivocado.
+- **failureMessages como JSON en TEXT es una decision que escalara bien**: Una tabla separada habria sido mas "relacional" pero sin beneficio practico — nunca se consultaran los failure messages independientemente del pago. El JSON es legible en la base de datos, simple de serializar, y no requiere JOINs.
+- **13 ITs (vs 11 de Customer/Fleet) reflejan la mayor complejidad**: 6 tests de repositorio (vs 3 de Customer) porque hay que testear findByReservationId, JSON serialization de failureMessages, y el unique constraint en reservation_id. La complejidad de los tests refleja la complejidad del dominio, no el numero de endpoints.
+- **Cuatro microservicios funcionales — la plataforma esta lista para la SAGA**: Customer (8181), Reservation (8182), Fleet (8183), Payment (8184). Los 4 arrancan, persisten en PostgreSQL, exponen REST API, y publican eventos (por ahora via logger no-op). El siguiente paso es la orquestacion: la SAGA que coordina los 4 servicios en un flujo de reserva end-to-end.
+
+### Siguiente paso
+
+**SAGA Orchestration** — el orquestador que coordinara Create Reservation → Process Payment → Confirm Reservation (happy path) y las compensaciones (Refund Payment → Cancel Reservation) cuando algo falla. Es el patron mas complejo de la plataforma y la razon por la que existe toda esta arquitectura.
