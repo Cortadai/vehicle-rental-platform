@@ -46,6 +46,8 @@
         <!-- Payment Service -->
         <module>payment-service/payment-domain</module>
         <module>payment-service/payment-application</module>
+        <module>payment-service/payment-infrastructure</module>
+        <module>payment-service/payment-container</module>
     </modules>
 
     <!-- ==================== PROPERTIES ==================== -->
@@ -129,6 +131,16 @@
             <dependency>
                 <groupId>com.vehiclerental</groupId>
                 <artifactId>payment-application</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>payment-infrastructure</artifactId>
+                <version>${vehicle-rental.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.vehiclerental</groupId>
+                <artifactId>payment-container</artifactId>
                 <version>${vehicle-rental.version}</version>
             </dependency>
             <dependency>
