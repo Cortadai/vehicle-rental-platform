@@ -10,8 +10,10 @@ This is a learning POC implementing enterprise microservice patterns. The primar
 
 1. Read `openspec/project.md` for architecture overview and conventions
 2. Read the relevant `docs/*.md` best practice documents listed in project.md
-3. Check `openspec/specs/` for current system state (source of truth)
-4. Check `openspec/changes/` for the active change being implemented
+3. Check `docs/roadmap-to-saga.md` for the implementation roadmap and pending changes
+4. Check `docs/journal.md` for the learning journal — update it after each `/opsx:archive`
+5. Check `openspec/specs/` for current system state (source of truth)
+6. Check `openspec/changes/` for the active change being implemented
 
 ### Best Practice Documents
 

@@ -1,5 +1,6 @@
 package com.vehiclerental.reservation.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.reservation.application.mapper.ReservationApplicationMapper;
 import com.vehiclerental.reservation.application.port.input.CreateReservationUseCase;
 import com.vehiclerental.reservation.application.port.input.TrackReservationUseCase;
@@ -14,8 +15,8 @@ import org.springframework.context.annotation.Configuration;
 public class BeanConfiguration {
 
     @Bean
-    public ReservationPersistenceMapper reservationPersistenceMapper() {
-        return new ReservationPersistenceMapper();
+    public ReservationPersistenceMapper reservationPersistenceMapper(ObjectMapper objectMapper) {
+        return new ReservationPersistenceMapper(objectMapper);
     }
 
     @Bean

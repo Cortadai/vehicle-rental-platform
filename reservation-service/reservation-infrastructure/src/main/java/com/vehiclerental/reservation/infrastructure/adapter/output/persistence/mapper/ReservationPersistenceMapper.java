@@ -1,5 +1,8 @@
 package com.vehiclerental.reservation.infrastructure.adapter.output.persistence.mapper;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.common.domain.vo.Money;
 import com.vehiclerental.reservation.domain.model.aggregate.Reservation;
 import com.vehiclerental.reservation.domain.model.entity.ReservationItem;
@@ -13,11 +16,18 @@ import com.vehiclerental.reservation.domain.model.vo.VehicleId;
 import com.vehiclerental.reservation.infrastructure.adapter.output.persistence.entity.ReservationItemJpaEntity;
 import com.vehiclerental.reservation.infrastructure.adapter.output.persistence.entity.ReservationJpaEntity;
 
-import java.util.Arrays;
 import java.util.Currency;
 import java.util.List;
 
 public class ReservationPersistenceMapper {
+
+    private static final TypeReference<List<String>> LIST_OF_STRINGS = new TypeReference<>() {};
+
+    private final ObjectMapper objectMapper;
+
+    public ReservationPersistenceMapper(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     public ReservationJpaEntity toJpaEntity(Reservation reservation) {
         var entity = new ReservationJpaEntity();
@@ -33,10 +43,7 @@ public class ReservationPersistenceMapper {
         entity.setTotalPriceAmount(reservation.getTotalPrice().amount());
         entity.setTotalPriceCurrency(reservation.getTotalPrice().currency().getCurrencyCode());
         entity.setStatus(reservation.getStatus().name());
-        entity.setFailureMessages(
-                reservation.getFailureMessages() != null && !reservation.getFailureMessages().isEmpty()
-                        ? String.join(",", reservation.getFailureMessages())
-                        : null);
+        entity.setFailureMessages(serializeFailureMessages(reservation.getFailureMessages()));
         entity.setCreatedAt(reservation.getCreatedAt());
         entity.setUpdatedAt(reservation.getUpdatedAt());
 
@@ -53,10 +60,6 @@ public class ReservationPersistenceMapper {
                 .map(this::toItemDomainEntity)
                 .toList();
 
-        List<String> failureMessages = entity.getFailureMessages() != null && !entity.getFailureMessages().isEmpty()
-                ? Arrays.asList(entity.getFailureMessages().split(","))
-                : List.of();
-
         Currency currency = Currency.getInstance(entity.getTotalPriceCurrency());
 
         return Reservation.reconstruct(
@@ -69,7 +72,7 @@ public class ReservationPersistenceMapper {
                 new Money(entity.getTotalPriceAmount(), currency),
                 ReservationStatus.valueOf(entity.getStatus()),
                 items,
-                failureMessages,
+                deserializeFailureMessages(entity.getFailureMessages()),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());
     }
@@ -97,5 +100,27 @@ public class ReservationPersistenceMapper {
                 new Money(entity.getDailyRateAmount(), currency),
                 entity.getDays(),
                 new Money(entity.getSubtotalAmount(), subtotalCurrency));
+    }
+
+    private String serializeFailureMessages(List<String> failureMessages) {
+        if (failureMessages == null || failureMessages.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(failureMessages);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize failureMessages", e);
+        }
+    }
+
+    private List<String> deserializeFailureMessages(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(json, LIST_OF_STRINGS);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to deserialize failureMessages", e);
+        }
     }
 }

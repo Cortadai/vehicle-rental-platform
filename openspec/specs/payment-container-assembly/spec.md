@@ -62,11 +62,12 @@ The base `application.yml` SHALL configure Spring datasource, JPA, Flyway for Po
 - **THEN** `spring.jpa.hibernate.ddl-auto` SHALL be `validate`
 - **AND** `spring.jpa.open-in-view` SHALL be `false`
 
-#### Scenario: Flyway is enabled with default schema
+#### Scenario: Flyway is enabled without default schema
 
 - **WHEN** application.yml is loaded
-- **THEN** Flyway SHALL be enabled
-- **AND** `spring.flyway.default-schema` SHALL be `payment`
+- **THEN** Flyway SHALL be enabled (`spring.flyway.enabled: true`)
+- **AND** `spring.flyway.default-schema` SHALL NOT be defined
+- **AND** Flyway SHALL use the default `public` schema, consistent with Customer, Fleet, and Reservation services
 
 #### Scenario: Server port is 8184
 

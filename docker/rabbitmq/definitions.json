@@ -177,6 +177,46 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "customer.validate.command.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "customer.validate.command.dlq"
+      }
+    },
+    {
+      "name": "payment.process.command.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "payment.process.command.dlq"
+      }
+    },
+    {
+      "name": "payment.refund.command.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "payment.refund.command.dlq"
+      }
+    },
+    {
+      "name": "fleet.confirm.command.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "fleet.confirm.command.dlq"
+      }
     }
   ],
   "bindings": [
@@ -306,6 +346,70 @@
       "destination": "fleet.dlq",
       "destination_type": "queue",
       "routing_key": "fleet.rejected.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "customer.exchange",
+      "vhost": "/",
+      "destination": "customer.validate.command.queue",
+      "destination_type": "queue",
+      "routing_key": "customer.validate.command",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "customer.dlq",
+      "destination_type": "queue",
+      "routing_key": "customer.validate.command.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "payment.exchange",
+      "vhost": "/",
+      "destination": "payment.process.command.queue",
+      "destination_type": "queue",
+      "routing_key": "payment.process.command",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "payment.dlq",
+      "destination_type": "queue",
+      "routing_key": "payment.process.command.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "payment.exchange",
+      "vhost": "/",
+      "destination": "payment.refund.command.queue",
+      "destination_type": "queue",
+      "routing_key": "payment.refund.command",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "payment.dlq",
+      "destination_type": "queue",
+      "routing_key": "payment.refund.command.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "fleet.exchange",
+      "vhost": "/",
+      "destination": "fleet.confirm.command.queue",
+      "destination_type": "queue",
+      "routing_key": "fleet.confirm.command",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "fleet.dlq",
+      "destination_type": "queue",
+      "routing_key": "fleet.confirm.command.dlq",
       "arguments": {}
     }
   ]

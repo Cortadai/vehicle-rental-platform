@@ -1980,3 +1980,180 @@ common-messaging/    ← outbox pattern, Spring JPA + AMQP
 ### Siguiente paso
 
 Los dos servicios criticos para la SAGA (Reservation y Payment) ya publican eventos reales a RabbitMQ. El siguiente paso puede ser conectar Customer y Fleet al bus (misma mecanica) o ir directo a la **SAGA Orchestration** — el orquestador que coordinara el flujo end-to-end.
+
+---
+
+## Fecha: 2026-02-22
+
+## Decimoseptimo Ciclo: Pre-SAGA Alignment — Alinear Inconsistencias Antes de la Coordinacion Distribuida
+
+### Contexto
+
+Con 4 microservicios funcionales (2 con Outbox real, 2 con logger no-op) y 392 tests pasando, el proyecto estaba listo *en apariencia* para entrar en la fase de SAGA. Pero una retrospectiva exhaustiva (`docs/retrospective-pre-saga.md`) — auditoria de los 19 modulos, topologia RabbitMQ, cobertura JaCoCo, y patrones de codigo — revelo 4 inconsistencias de prioridad alta que habria que resolver antes de que la coordinacion distribuida las amplificara.
+
+Este ciclo tiene dos particularidades:
+
+1. **Es el primer change retroactivo**: La implementacion se hizo directamente sin pasar por el flujo OpenSpec. Los artefactos (proposal.md, design.md, tasks.md, delta specs) se generaron *despues* de implementar y verificar, manteniendo la trazabilidad spec↔codigo sin retrasar el trabajo.
+2. **Es puramente de alineacion**: No agrega funcionalidad nueva. Unifica patrones existentes y prepara infraestructura para los proximos changes.
+
+### Que construimos
+
+**4 tareas, 5 tests nuevos, 397 tests totales, BUILD SUCCESS**
+
+#### Tarea 1: failureMessages — de comma-separated a JSON
+
+```
+reservation-service/reservation-infrastructure/.../mapper/
+└── ReservationPersistenceMapper.java  ← MODIFICADO: ObjectMapper via constructor
+
+reservation-service/reservation-container/.../config/
+└── BeanConfiguration.java             ← MODIFICADO: factory method con ObjectMapper
+```
+
+- **Antes**: `String.join(",", failureMessages)` para serializar, `failureMessages.split(",")` para deserializar. Fragil: si un mensaje contiene una coma, se parte incorrectamente.
+- **Despues**: `objectMapper.writeValueAsString(failureMessages)` / `objectMapper.readValue(json, new TypeReference<List<String>>(){})`. Robusto: JSON escapa correctamente cualquier caracter.
+- **Patron identico** al que ya usaba `PaymentPersistenceMapper` (ciclo #15).
+- **Consecuencia**: `ReservationPersistenceMapper` pasa de POJO plano a bean con dependencia. `BeanConfiguration` actualiza el factory method para inyectar `ObjectMapper`.
+
+#### Tarea 2: Remover Flyway default-schema de Payment
+
+```
+payment-service/payment-container/src/main/resources/
+└── application.yml  ← MODIFICADO: eliminada linea default-schema: payment
+```
+
+- **Antes**: Solo Payment definia `spring.flyway.default-schema: payment`. Los otros 3 servicios no lo definian (usan `public` por defecto).
+- **Despues**: Ninguno define `default-schema`. Consistencia total.
+- **Justificacion**: En database-per-service, el schema `public` es suficiente. El `default-schema` era un artefacto del ciclo #15 que intento resolver un problema de Docker Compose (base compartida) pero causo problemas con Testcontainers (ciclo #15, Error 2).
+
+#### Tarea 3: Tests unitarios para OutboxPublisher
+
+```
+common-messaging/pom.xml                                  ← MODIFICADO: +spring-boot-starter-test
+common-messaging/src/test/java/.../outbox/
+└── OutboxPublisherTest.java                               ← NUEVO: 5 tests con Mockito
+```
+
+- `common-messaging` tenia **0 tests** — la logica critica del OutboxPublisher (polling, status transitions, retry, headers AMQP) solo se ejercitaba indirectamente via los ITs de Reservation y Payment.
+- 5 unit tests cubren los caminos criticos:
+  1. No-op cuando no hay eventos PENDING
+  2. Publish exitoso marca PUBLISHED y guarda
+  3. Fallo de send incrementa retry count
+  4. Max retries (5) marca FAILED
+  5. Headers AMQP correctos (X-Aggregate-Type, X-Aggregate-Id, messageId, contentType)
+- **Decision**: Unit tests con mocks (no IT con Testcontainers). Los ITs end-to-end ya existen en cada servicio. Estos tests cubren la logica interna que los ITs no verifican directamente (retry count, headers).
+
+#### Tarea 4: 4 command queues para SAGA orchestration
+
+```
+docker/rabbitmq/
+└── definitions.json  ← MODIFICADO: +4 queues, +8 bindings
+```
+
+Nuevas queues:
+
+| Queue | Exchange (receptor) | Routing Key | DLQ |
+|-------|-------------------|-------------|-----|
+| `customer.validate.command.queue` | `customer.exchange` | `customer.validate.command` | `customer.dlq` |
+| `payment.process.command.queue` | `payment.exchange` | `payment.process.command` | `payment.dlq` |
+| `payment.refund.command.queue` | `payment.exchange` | `payment.refund.command` | `payment.dlq` |
+| `fleet.confirm.command.queue` | `fleet.exchange` | `fleet.confirm.command` | `fleet.dlq` |
+
+- **Patron**: Cada command queue se bindea al exchange del servicio receptor (no del orquestador). Esto sigue la convencion de que cada servicio es dueno de su exchange.
+- **Naming**: `{service}.{action}.command.queue` — distingue comandos de eventos por convencion.
+- **DLQ**: Reutilizan la DLQ del servicio receptor (e.g., `customer.validate.command.dlq` → `customer.dlq`).
+- **Topologia resultante**: 5 exchanges, 16 queues (8 eventos + 4 DLQ + 4 comandos), 24 bindings.
+
+### Decisiones de Diseno Clave
+
+#### Decision 1: JSON sin fallback comma-separated
+
+- No hay datos legacy en produccion (POC). Un fallback añadiria complejidad sin beneficio.
+- Si hubiera datos legacy, la migracion seria un script SQL: `UPDATE reservations SET failure_messages = '["' || replace(failure_messages, ',', '","') || '"]' WHERE failure_messages IS NOT NULL AND failure_messages NOT LIKE '[%'`.
+
+#### Decision 2: Remover default-schema, no agregarlo a los demas
+
+- Cuatro bases de datos separadas (`customer_db`, `fleet_db`, `reservation_db`, `payment_db`) — schema separation no aporta valor.
+- Agregarla a los otros 3 significaria cambiar 3 application.yml + 3 application-test.yml + potencialmente ITs. Mucho ruido, cero beneficio.
+
+#### Decision 3: Unit tests con mocks para OutboxPublisher — no IT
+
+- Testcontainers para un modulo compartido (common-messaging) requeriria decidir contra cual servicio testear, o crear un contexto Spring artificial. Los mocks son mas limpios.
+- Los ITs reales ya cubren el flujo end-to-end. Estos tests cubren el gap: logica interna (retry, status transitions, headers).
+
+#### Decision 4: Command queues en exchange del receptor
+
+- En **orquestacion**, el orquestador (Reservation) envia comandos. El receptor (Customer, Payment, Fleet) define *donde* los recibe.
+- Si usaramos un `saga.exchange` centralizado, todos los servicios tendrian que saber de ese exchange — acoplamiento.
+- Con exchange del receptor, el binding es transparente: `payment.exchange` → `payment.process.command.queue`. El orquestador solo necesita saber el exchange y routing key de destino.
+
+### Workflow Retroactivo: Generar Artefactos OpenSpec Post-Implementacion
+
+Este es el primer change donde los artefactos OpenSpec se crearon **despues** de implementar:
+
+1. Se implementaron las 4 tareas y se verifico BUILD SUCCESS (397 tests).
+2. Se generaron retroactivamente: `.openspec.yaml`, `proposal.md`, `design.md`, `tasks.md` (con todas las tareas marcadas `[x]`).
+3. Se crearon 3 delta specs que documentan los cambios en capabilities existentes:
+   - `reservation-jpa-persistence/spec.md` — MODIFIED: failureMessages JSON
+   - `payment-container-assembly/spec.md` — MODIFIED: Flyway sin default-schema
+   - `rabbitmq-topology/spec.md` — ADDED: command queues + bindings + DLQ bindings
+4. Se verifico que los delta specs coinciden exactamente con el estado actual del codigo.
+5. Se sincronizaron los delta specs al source of truth (`openspec/specs/`).
+6. Se archivo como `2026-02-22-pre-saga-alignment`.
+
+**Leccion**: El flujo OpenSpec puede usarse retroactivamente cuando la implementacion ya esta hecha. Los artefactos retroactivos son documentacion precisa (no especulativa) — documentan *lo que se hizo*, no lo que se *planea hacer*. La clave es que los delta specs se verifiquen contra el codigo real, no se escriban de memoria.
+
+### Verificacion Final
+
+- **397 tests, 0 fallos, 0 errores, 0 skipped**:
+  - 392 tests previos intactos
+  - 5 tests nuevos en `OutboxPublisherTest` (common-messaging)
+- **BUILD SUCCESS** al primer intento.
+- Delta specs verificados contra codigo fuente — zero discrepancias.
+- Specs sincronizadas a `openspec/specs/` (3 capabilities actualizadas).
+
+### Estado de la Topologia RabbitMQ Post-Alignment
+
+```
+Exchanges (5):  reservation, customer, payment, fleet, dlx
+
+Event Queues (8):
+  reservation.created.queue
+  customer.validated.queue, customer.rejected.queue
+  payment.completed.queue, payment.failed.queue, payment.refunded.queue
+  fleet.confirmed.queue, fleet.rejected.queue
+
+Command Queues (4):                         ← NUEVAS
+  customer.validate.command.queue
+  payment.process.command.queue
+  payment.refund.command.queue
+  fleet.confirm.command.queue
+
+DLQ (4):  reservation.dlq, customer.dlq, payment.dlq, fleet.dlq
+```
+
+### Comparativa: Antes vs Despues del Alignment
+
+| Aspecto | Antes | Despues |
+|---------|-------|---------|
+| failureMessages (Reservation) | Comma-separated | JSON (ObjectMapper) |
+| failureMessages (Payment) | JSON (ObjectMapper) | JSON (ObjectMapper) — sin cambio |
+| Flyway default-schema (Payment) | `payment` | No definido (usa `public`) |
+| Flyway default-schema (otros 3) | No definido | No definido — sin cambio |
+| OutboxPublisher tests | 0 | 5 unit tests |
+| Command queues | 0 | 4 queues + 8 bindings |
+| Total queues en definitions.json | 12 | 16 |
+| Total bindings en definitions.json | 16 | 24 |
+| Total tests plataforma | 392 | 397 |
+
+### Reflexiones del decimoseptimo ciclo
+
+- **La retrospectiva fue la herramienta correcta**: Sin la auditoria sistematica de los 19 modulos, las inconsistencias habrian pasado desapercibidas hasta que la SAGA las amplificara. Un mensaje con una coma en `failureMessages` habria causado un bug silencioso. La retrospectiva es mas valiosa *antes* de una fase de complejidad creciente, no despues.
+- **El flujo retroactivo funciona pero es menos valioso que el flujo prospectivo**: Los artefactos generados post-implementacion son documentacion, no planificacion. No generaron las decisiones — las documentaron. El valor real de OpenSpec (pensar antes de implementar) solo se obtiene con el flujo completo. El flujo retroactivo es un *seguro de trazabilidad*, no un sustituto.
+- **Las 4 tareas eran individualmente triviales pero colectivamente necesarias**: Ninguna de las 4 merecia su propio change. Pero dejarlas como deuda tecnica significaba entrar en SAGA con inconsistencias que complicarian el debugging. Agruparlas en un change de alineacion es el patron correcto: overhead minimo, maximo beneficio de consistencia.
+- **La topologia de commands esta lista antes de necesitarla**: Las 4 command queues existen en definitions.json pero nadie las usa todavia. Esto es intencional: cuando `customer-outbox-and-messaging` implemente el `CustomerValidationListener`, la queue ya estara ahi. No habra que modificar definitions.json en cada change de messaging — solo en este, una vez.
+- **El mapper POJO plano ya no existe en Reservation**: Con este cambio, `ReservationPersistenceMapper` sigue el mismo patron que `PaymentPersistenceMapper` — ambos requieren `ObjectMapper` via constructor. Customer y Fleet mantienen mappers POJO planos porque no tienen `failureMessages`. Si en el futuro lo necesitan, la conversion es mecanica.
+
+### Siguiente paso
+
+**Customer Outbox + Messaging** — conectar Customer Service al bus de mensajeria. Es el primer servicio participante de SAGA (no orquestador): necesita outbox infrastructure, nuevos domain events (`CustomerValidatedEvent`, `CustomerValidationFailedEvent`), un use case de validacion, y el primer `@RabbitListener` de toda la plataforma.
