@@ -1832,4 +1832,151 @@ container → infrastructure → application → domain → common
 
 ### Siguiente paso
 
-**SAGA Orchestration** — el orquestador que coordinara Create Reservation → Process Payment → Confirm Reservation (happy path) y las compensaciones (Refund Payment → Cancel Reservation) cuando algo falla. Es el patron mas complejo de la plataforma y la razon por la que existe toda esta arquitectura.
+**Payment Outbox + Messaging** — conectar Payment al bus de mensajeria existente usando el Outbox Pattern que ya funciona en Reservation. Los 3 eventos de dominio (completed, failed, refunded) necesitan llegar a RabbitMQ para que la futura SAGA sepa el resultado de cada pago.
+
+---
+
+## Fecha: 2026-02-22
+
+## Decimosexto Ciclo: Payment Outbox + Messaging — Enchufar el Cuarto Servicio al Bus
+
+### Contexto
+
+Payment Service tiene 4 modulos hexagonales funcionando, 13 ITs pasando, y 3 eventos de dominio (`PaymentCompletedEvent`, `PaymentFailedEvent`, `PaymentRefundedEvent`) que se "publican" via un logger no-op (`PaymentDomainEventPublisherAdapter`). Los eventos se loguean y se pierden — no llegan a RabbitMQ, no pueden ser consumidos por la SAGA.
+
+Toda la infraestructura pesada ya existe desde el ciclo #12 (`reservation-outbox-and-messaging`): el modulo `common-messaging` con OutboxEvent/OutboxPublisher/OutboxCleanupScheduler, Docker Compose con PostgreSQL + RabbitMQ, `definitions.json` con topologia pre-declarada para los 4 servicios, e `init-schemas.sql` con schema `payment` + `payment_user`.
+
+Este change es deliberadamente mecanico: aplica el patron consolidado del ciclo #12 a un nuevo servicio. La unica novedad es que Payment tiene 3 eventos (vs 2 de Reservation), lo que implica 3 queues, 3 bindings y 3 DLQ bindings en lugar de 1.
+
+### Que construimos
+
+#### Nuevo adaptador: `OutboxPaymentDomainEventPublisher`
+
+```
+payment-service/payment-infrastructure/src/main/java/.../adapter/output/event/
+├── OutboxPaymentDomainEventPublisher.java  ← NUEVO: implementa PaymentDomainEventPublisher
+└── PaymentDomainEventPublisherAdapter.java ← ELIMINADO: logger no-op
+```
+
+- Implementa `PaymentDomainEventPublisher` (el output port de application).
+- Tiene **cero imports de RabbitMQ** — solo depende de `OutboxEventRepository` (JPA) y `ObjectMapper` (Jackson).
+- Usa `AGGREGATE_TYPE = "PAYMENT"` y `EXCHANGE = "payment.exchange"`.
+- Deriva routing keys por convencion: `PaymentCompletedEvent` → `payment.completed`, `PaymentFailedEvent` → `payment.failed`, `PaymentRefundedEvent` → `payment.refunded`.
+- Pattern matching sobre 3 tipos de evento para extraer `paymentId().value().toString()` como aggregateId.
+- `@Component` — Spring auto-detecta el reemplazo del viejo adapter sin cambios en BeanConfiguration.
+
+#### Nueva configuracion: `RabbitMQConfig`
+
+```
+payment-service/payment-infrastructure/src/main/java/.../config/
+├── GlobalExceptionHandler.java  ← existente, sin cambios
+└── RabbitMQConfig.java          ← NUEVO: topologia AMQP completa
+```
+
+- Declara `payment.exchange` (TopicExchange) y `dlx.exchange` (DirectExchange, idempotente con Reservation).
+- 3 queues principales: `payment.completed.queue`, `payment.failed.queue`, `payment.refunded.queue` — cada una con DLQ routing.
+- 1 DLQ compartida: `payment.dlq`.
+- 6 bindings: 3 de queues a exchange + 3 de DLQ a dlx.exchange.
+
+#### Cambios en container
+
+- `PaymentServiceApplication` — añadidas las 3 anotaciones de scanning cross-module: `@SpringBootApplication(scanBasePackages)`, `@EntityScan`, `@EnableJpaRepositories`.
+- `application.yml` — añadidas propiedades `spring.rabbitmq.host/port/username/password` con defaults via env vars.
+- `V2__create_outbox_events_table.sql` — migración Flyway identica a la de Reservation (tabla generica por diseno).
+- `payment-infrastructure/pom.xml` — añadida dependencia `common-messaging`.
+- `payment-container/pom.xml` — añadidas dependencias test `testcontainers-rabbitmq` + `awaitility`.
+
+#### Actualización de `definitions.json`
+
+- Añadida `payment.refunded.queue` (faltaba — solo existian completed y failed).
+- Añadido binding de `payment.exchange` → `payment.refunded.queue` con routing key `payment.refunded`.
+- Añadido DLQ binding de `dlx.exchange` → `payment.dlq` con routing key `payment.refunded.dlq`.
+
+#### ITs existentes actualizados + 2 ITs nuevos
+
+- `PaymentRepositoryAdapterIT`, `PaymentControllerIT`, `PaymentServiceApplicationIT` — añadido `@Container @ServiceConnection RabbitMQContainer` a los 3 (leccion del ciclo #12: una vez messaging esta en classpath, todos los ITs necesitan broker).
+- `OutboxAtomicityIT` — verifica que payment + outbox event persisten en la misma transaccion, y que un fallo de dominio (amount zero) rollbackea ambos.
+- `OutboxPublisherIT` — inserta un OutboxEvent PENDING, espera con Awaitility a que el scheduler lo marque PUBLISHED, y verifica que el mensaje llego a `payment.completed.queue`.
+
+### Notable Findings During Implementation
+
+#### Finding 1: La implementacion fue completamente mecanica — zero errores, zero sorpresas
+
+A diferencia del ciclo #12 (que genero 3 lecciones criticas documentadas en CLAUDE.md), este change se implemento sin ningun error ni iteracion. Las 14 tareas se completaron en secuencia directa y `mvn clean verify` paso al primer intento con los 16 tests (13 existentes + 2 nuevos + 1 smoke).
+
+**Por que**: Las 3 lecciones del ciclo #12 (cross-module scanning, RabbitMQ en todos los ITs, domain events transitorios) ya estaban documentadas en CLAUDE.md y se aplicaron proactivamente. El design.md del change referencio explicitamente cada leccion. Esto valida que **documentar lecciones aprendidas en un archivo persistente (CLAUDE.md) tiene retorno real**: los mismos errores no se repiten.
+
+**Reflexion**: En el ciclo #15 el error del constructor `protected` se repitio porque la leccion estaba en el journal pero no en los docs de best practices. En este ciclo, las lecciones estaban en CLAUDE.md (que el agente lee antes de cada sesion) y no se repitieron. La diferencia no es donde se documenta, sino **si el contexto de implementacion lo lee automaticamente**.
+
+#### Finding 2: 3 eventos vs 2 — la unica dimension nueva
+
+Reservation tiene 2 eventos (created, cancelled) → 1 queue + 1 DLQ binding. Payment tiene 3 eventos (completed, failed, refunded) → 3 queues + 3 DLQ bindings. Esta diferencia cuantitativa no añadio complejidad conceptual, pero si superficie:
+
+- `RabbitMQConfig` tiene 12 beans (vs 6 de Reservation).
+- `definitions.json` necesitaba un queue + 2 bindings adicionales que no existian (payment.refunded.queue).
+- `extractAggregateId()` tiene 3 ramas de pattern matching (vs 2 de Reservation).
+
+**Leccion**: El patron escala linealmente con el numero de eventos. Cada evento nuevo añade: 1 queue, 1 binding, 1 DLQ binding, 1 rama en extractAggregateId, y 1 linea en deriveRoutingKey. No hay complejidad emergente.
+
+#### Finding 3: `definitions.json` estaba incompleto — payment.refunded.queue no existia
+
+El ciclo #12 pre-declaro la topologia de los 4 servicios en `definitions.json`, pero solo incluyo `payment.completed.queue` y `payment.failed.queue`. La queue para `payment.refunded` no existia porque en ese momento Payment era solo un skeleton sin domain events definidos — el tercer evento (refund) se especifico en el ciclo #13.
+
+Esto confirma la decision del ciclo #12 de que `RabbitMQConfig` como beans Spring es una "validacion idempotente" de lo pre-declarado en `definitions.json`: si el JSON esta incompleto, los beans de Spring crean la topologia faltante al arrancar. Pero la buena practica es mantener `definitions.json` como fuente de verdad y actualizarlo cuando se añaden eventos.
+
+#### Finding 4: BeanConfiguration no necesito cambios — @Component es plug-and-play
+
+El viejo `PaymentDomainEventPublisherAdapter` era `@Component`. El nuevo `OutboxPaymentDomainEventPublisher` tambien es `@Component` implementando la misma interfaz. Spring auto-detecta el reemplazo sin tocar `BeanConfiguration`. Esto funciona porque `BeanConfiguration` inyecta `PaymentDomainEventPublisher` (la interfaz), no la implementacion concreta.
+
+**Leccion**: Cuando el output port se resuelve por component scan (no por `@Bean` manual), reemplazar un adapter es tan simple como borrar el viejo y crear el nuevo con la misma interfaz. El hexagono hace su trabajo.
+
+### Verificacion Final
+
+- **16 tests de integracion, 0 fallos**:
+  - `PaymentRepositoryAdapterIT` — 6 tests (sin cambios en logica, solo añadido RabbitMQ container)
+  - `PaymentControllerIT` — 6 tests (sin cambios en logica, solo añadido RabbitMQ container)
+  - `PaymentServiceApplicationIT` — 1 test (smoke test, ahora con RabbitMQ container)
+  - `OutboxAtomicityIT` — 2 tests (atomicidad + rollback)
+  - `OutboxPublisherIT` — 1 test (scheduler → RabbitMQ)
+- **BUILD SUCCESS** al primer intento.
+- **`PaymentDomainEventPublisherAdapter.java`** confirmado eliminado del source tree.
+
+### Comparativa: Reservation Outbox (ciclo #12) vs Payment Outbox (este ciclo)
+
+| Aspecto | Reservation (ciclo #12) | Payment (este ciclo) |
+|---------|------------------------|---------------------|
+| Tareas | 20+ (incluye Docker, common-messaging) | 14 (solo "enchufar") |
+| Modulos nuevos | 1 (common-messaging) | 0 |
+| Clases Java nuevas | ~10 (common-messaging + infra) | 2 (OutboxPublisher + RabbitMQConfig) |
+| Docker changes | docker-compose.yml, Makefile, init-schemas.sql, rabbitmq.conf, definitions.json | Solo definitions.json (1 queue + 2 bindings) |
+| Eventos | 2 (created, cancelled) | 3 (completed, failed, refunded) |
+| Queues | 1 + 1 DLQ | 3 + 1 DLQ |
+| Beans en RabbitMQConfig | 6 | 12 |
+| ITs nuevos | 5 (3 atomicidad + 2 publisher) | 3 (2 atomicidad + 1 publisher) |
+| Lecciones nuevas en CLAUDE.md | 3 (scanning, RabbitMQ en ITs, events transitorios) | 0 (todas aplicadas del ciclo #12) |
+| Errores durante implementacion | 3+ (scanning, ITs rotos, events perdidos) | 0 |
+| Tiempo conceptual | Alto (patron nuevo) | Bajo (patron replicado) |
+
+### Reflexiones del decimosexto ciclo
+
+- **Zero errores valida que las lecciones del ciclo #12 estan bien documentadas**: Las 3 lecciones en CLAUDE.md (cross-module scanning, RabbitMQ en todos los ITs, domain events transitorios) previnieron exactamente los 3 errores que habrian ocurrido. Documentar lecciones en un archivo que se lee automaticamente al inicio de cada sesion es mas efectivo que documentarlas solo en el journal.
+- **El patron Outbox es completamente mecanico una vez consolidado**: 14 tareas, zero ambiguedad, zero decisiones nuevas. Todo fue aplicar el template del ciclo #12. Esto valida que la arquitectura hexagonal + Outbox Pattern es un **patron repetible**: cada servicio nuevo se conecta al bus con el mismo checklist.
+- **La diferencia entre "crear un patron" y "replicar un patron" es dramatica**: El ciclo #12 fue el mas denso del proyecto (Docker Compose, modulo Maven nuevo, 3 lecciones criticas, multiples errores). Este ciclo fue el mas rapido (14 tareas lineales, zero iteraciones). La inversion en crear un patron bien documentado se amortiza con cada replica.
+- **definitions.json como fuente de verdad requiere mantenimiento activo**: Pre-declarar la topologia de los 4 servicios en el ciclo #12 fue una buena decision, pero quedo incompleta cuando Payment añadio el tercer evento (refund) en ciclos posteriores. La leccion: cuando se añaden domain events, actualizar definitions.json debe ser parte del checklist.
+- **Dos servicios con Outbox real, dos pendientes**: Reservation y Payment publican eventos reales a RabbitMQ. Customer y Fleet siguen con logger no-op. Los connects de Customer y Fleet seran identicos a este change — mecanicos, sin sorpresas.
+
+### Estado actual de la plataforma
+
+```
+customer-service/    (puerto 8181) ← event publisher: logger no-op
+fleet-service/       (puerto 8183) ← event publisher: logger no-op
+reservation-service/ (puerto 8183) ← event publisher: OUTBOX → RabbitMQ
+payment-service/     (puerto 8184) ← event publisher: OUTBOX → RabbitMQ  ← NUEVO
+
+common/              ← shared kernel, zero Spring
+common-messaging/    ← outbox pattern, Spring JPA + AMQP
+```
+
+### Siguiente paso
+
+Los dos servicios criticos para la SAGA (Reservation y Payment) ya publican eventos reales a RabbitMQ. El siguiente paso puede ser conectar Customer y Fleet al bus (misma mecanica) o ir directo a la **SAGA Orchestration** — el orquestador que coordinara el flujo end-to-end.
