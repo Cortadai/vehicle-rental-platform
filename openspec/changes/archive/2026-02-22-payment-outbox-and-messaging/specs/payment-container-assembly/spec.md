@@ -1,12 +1,4 @@
-payment-container-assembly
-==========================
-
-Purpose
--------
-
-Spring Boot assembly module for Payment Service. Contains the main application class, manual bean registration for domain and application layers, and configuration files. This is the only payment module with `spring-boot-maven-plugin` (executable JAR).
-
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: PaymentServiceApplication is the Spring Boot entry point
 
@@ -23,27 +15,6 @@ PaymentServiceApplication SHALL be annotated with `@SpringBootApplication(scanBa
 - **THEN** it SHALL have `@SpringBootApplication(scanBasePackages = "com.vehiclerental")`
 - **AND** it SHALL have `@EntityScan(basePackages = "com.vehiclerental")`
 - **AND** it SHALL have `@EnableJpaRepositories(basePackages = "com.vehiclerental")`
-
-### Requirement: BeanConfiguration registers domain and application beans
-
-BeanConfiguration SHALL be a `@Configuration` class that manually creates beans for classes that have no Spring annotations (domain and application layer classes).
-
-#### Scenario: PaymentApplicationMapper is registered as a bean
-
-- **WHEN** the application context is loaded
-- **THEN** a `PaymentApplicationMapper` bean SHALL be available
-
-#### Scenario: PaymentApplicationService is registered as a bean
-
-- **WHEN** the application context is loaded
-- **THEN** a `PaymentApplicationService` bean SHALL be available
-- **AND** it SHALL be injected with `PaymentRepository`, `PaymentDomainEventPublisher`, `PaymentGateway`, and `PaymentApplicationMapper`
-
-#### Scenario: Input ports are exposed as beans
-
-- **WHEN** the application context is loaded
-- **THEN** beans for `ProcessPaymentUseCase`, `RefundPaymentUseCase`, and `GetPaymentUseCase` SHALL be available
-- **AND** they SHALL all resolve to the same `PaymentApplicationService` instance
 
 ### Requirement: application.yml configures datasource, JPA, Flyway, and RabbitMQ
 
@@ -95,19 +66,7 @@ An `application-test.yml` or test configuration SHALL configure the application 
 - **WHEN** any `@SpringBootTest` integration test class is inspected
 - **THEN** it SHALL declare a `RabbitMQContainer` with `@Container` and `@ServiceConnection`
 
-### Requirement: Container module is the only executable module
-
-The payment-container POM SHALL include `spring-boot-maven-plugin`. No other payment-service module SHALL include this plugin.
-
-#### Scenario: Container POM has spring-boot-maven-plugin
-
-- **WHEN** `payment-service/payment-container/pom.xml` is inspected
-- **THEN** it SHALL declare `spring-boot-maven-plugin` in `<build><plugins>`
-
-#### Scenario: Infrastructure POM does not have spring-boot-maven-plugin
-
-- **WHEN** `payment-service/payment-infrastructure/pom.xml` is inspected
-- **THEN** it SHALL NOT declare `spring-boot-maven-plugin`
+## ADDED Requirements
 
 ### Requirement: Flyway V2 migration creates outbox_events table
 
@@ -145,8 +104,3 @@ The payment-infrastructure POM SHALL declare a dependency on `common-messaging`.
 
 - **WHEN** `payment-service/payment-infrastructure/pom.xml` is inspected
 - **THEN** it SHALL declare `com.vehiclerental:common-messaging` as a dependency
-
-Constraint: Container is the assembly layer
---------------------------------------------
-
-BeanConfiguration SHALL live in `com.vehiclerental.payment.config`. PaymentServiceApplication SHALL live in `com.vehiclerental.payment`. No business logic SHALL exist in the container module.
