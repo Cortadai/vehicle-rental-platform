@@ -19,15 +19,18 @@
 - [x] Tests unitarios para OutboxPublisher (common-messaging)
 - [x] Anadir 4 command queues a definitions.json
 
-## Change 2: customer-outbox-and-messaging [PENDIENTE]
+## Change 2: customer-outbox-and-messaging [COMPLETADO]
 
-- [ ] Outbox infrastructure (mecanico, copia de Payment)
-- [ ] @EntityScan + @EnableJpaRepositories + scanBasePackages
-- [ ] CustomerValidatedEvent + CustomerValidationFailedEvent
-- [ ] ValidateCustomerForReservationUseCase
-- [ ] CustomerValidationListener (@RabbitListener)
-- [ ] RabbitMQContainer en todos los ITs
-- [ ] OutboxPublisherIT + OutboxAtomicityIT
+- [x] Outbox infrastructure (OutboxCustomerDomainEventPublisher reemplaza logger no-op)
+- [x] @EntityScan + @EnableJpaRepositories + scanBasePackages
+- [x] CustomerValidatedEvent + CustomerRejectedEvent (nombre alineado con FleetRejectedEvent)
+- [x] ValidateCustomerForReservationUseCase (6to interface en CustomerApplicationService)
+- [x] CustomerValidationListener (@RabbitListener — primero de la plataforma)
+- [x] RabbitMQConfig (customer.exchange, 3 queues, per-queue DLQ routing keys)
+- [x] RabbitMQContainer en todos los ITs (3 existentes + 2 nuevos)
+- [x] OutboxPublisherIT + OutboxAtomicityIT
+- [x] V2__create_outbox_events_table.sql
+- [x] docker-java.properties api.version=1.44 (workaround Docker 29.x / Testcontainers 1.20.4)
 
 ## Change 3: fleet-outbox-and-messaging [PENDIENTE]
 

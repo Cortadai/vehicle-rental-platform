@@ -18,6 +18,7 @@ class CustomerDomainEventsTest {
     private static final Instant OCCURRED_ON = Instant.now();
     private static final CustomerId CUSTOMER_ID = new CustomerId(UUID.randomUUID());
     private static final Email EMAIL = new Email("john@example.com");
+    private static final UUID RESERVATION_ID = UUID.randomUUID();
 
     // --- CustomerCreatedEvent ---
 
@@ -139,6 +140,71 @@ class CustomerDomainEventsTest {
     @Test
     void deletedEventNullOccurredOnThrows() {
         assertThatThrownBy(() -> new CustomerDeletedEvent(EVENT_ID, null, CUSTOMER_ID))
+                .isInstanceOf(CustomerDomainException.class);
+    }
+
+    // --- CustomerValidatedEvent ---
+
+    @Test
+    void validatedEventFieldsAccessible() {
+        var event = new CustomerValidatedEvent(EVENT_ID, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID);
+
+        assertThat(event.eventId()).isEqualTo(EVENT_ID);
+        assertThat(event.occurredOn()).isEqualTo(OCCURRED_ON);
+        assertThat(event.customerId()).isEqualTo(CUSTOMER_ID);
+        assertThat(event.reservationId()).isEqualTo(RESERVATION_ID);
+    }
+
+    @Test
+    void validatedEventImplementsDomainEvent() {
+        var event = new CustomerValidatedEvent(EVENT_ID, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID);
+
+        assertThat(event).isInstanceOf(DomainEvent.class);
+    }
+
+    @Test
+    void validatedEventNullEventIdThrows() {
+        assertThatThrownBy(() -> new CustomerValidatedEvent(null, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID))
+                .isInstanceOf(CustomerDomainException.class);
+    }
+
+    @Test
+    void validatedEventNullOccurredOnThrows() {
+        assertThatThrownBy(() -> new CustomerValidatedEvent(EVENT_ID, null, CUSTOMER_ID, RESERVATION_ID))
+                .isInstanceOf(CustomerDomainException.class);
+    }
+
+    // --- CustomerRejectedEvent ---
+
+    @Test
+    void rejectedEventFieldsAccessible() {
+        var failureMessages = java.util.List.of("Customer not found: abc");
+        var event = new CustomerRejectedEvent(EVENT_ID, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID, failureMessages);
+
+        assertThat(event.eventId()).isEqualTo(EVENT_ID);
+        assertThat(event.occurredOn()).isEqualTo(OCCURRED_ON);
+        assertThat(event.customerId()).isEqualTo(CUSTOMER_ID);
+        assertThat(event.reservationId()).isEqualTo(RESERVATION_ID);
+        assertThat(event.failureMessages()).containsExactly("Customer not found: abc");
+    }
+
+    @Test
+    void rejectedEventImplementsDomainEvent() {
+        var failureMessages = java.util.List.of("some failure");
+        var event = new CustomerRejectedEvent(EVENT_ID, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID, failureMessages);
+
+        assertThat(event).isInstanceOf(DomainEvent.class);
+    }
+
+    @Test
+    void rejectedEventNullEventIdThrows() {
+        assertThatThrownBy(() -> new CustomerRejectedEvent(null, OCCURRED_ON, CUSTOMER_ID, RESERVATION_ID, java.util.List.of()))
+                .isInstanceOf(CustomerDomainException.class);
+    }
+
+    @Test
+    void rejectedEventNullOccurredOnThrows() {
+        assertThatThrownBy(() -> new CustomerRejectedEvent(EVENT_ID, null, CUSTOMER_ID, RESERVATION_ID, java.util.List.of()))
                 .isInstanceOf(CustomerDomainException.class);
     }
 }

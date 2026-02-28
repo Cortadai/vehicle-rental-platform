@@ -2157,3 +2157,140 @@ DLQ (4):  reservation.dlq, customer.dlq, payment.dlq, fleet.dlq
 ### Siguiente paso
 
 **Customer Outbox + Messaging** — conectar Customer Service al bus de mensajeria. Es el primer servicio participante de SAGA (no orquestador): necesita outbox infrastructure, nuevos domain events (`CustomerValidatedEvent`, `CustomerValidationFailedEvent`), un use case de validacion, y el primer `@RabbitListener` de toda la plataforma.
+
+---
+
+## Ciclo #18: customer-outbox-and-messaging (2026-02-28)
+
+### Que se hizo
+
+Conectar Customer Service al bus de mensajeria via Outbox Pattern. Customer Service es el primer servicio **participante** de SAGA (no orquestador): recibe un comando de validacion via RabbitMQ, ejecuta logica de negocio, y responde con un evento de exito o rechazo a traves del outbox.
+
+### Cambios implementados
+
+| Capa | Ficheros | Descripcion |
+|------|----------|-------------|
+| Domain | `CustomerValidatedEvent`, `CustomerRejectedEvent` | 2 nuevos records de SAGA response. Usan `reservationId` (UUID crudo) para correlacion cross-domain. |
+| Application | `ValidateCustomerCommand`, `ValidateCustomerForReservationUseCase`, `CustomerApplicationService` | 6to interface implementado. Busca customer, valida estado ACTIVE, publica evento directamente (no via aggregate). |
+| Infrastructure | `OutboxCustomerDomainEventPublisher` | Reemplaza el logger no-op. 6 instanceof checks, routing key auto-derivation, JSON via ObjectMapper, save a OutboxEventRepository. |
+| Infrastructure | `RabbitMQConfig` | TopicExchange, 3 queues (validated, rejected, validate.command), per-queue DLQ routing keys, DirectExchange DLX. |
+| Infrastructure | `CustomerValidationListener` | Primer `@RabbitListener` de la plataforma. Recibe raw Message, parsea JSON, invoca use case. |
+| Container | `CustomerServiceApplication` | `@EntityScan` + `@EnableJpaRepositories` para cross-module JPA scanning de common-messaging. |
+| Container | `application.yml` | RabbitMQ connection + listener retry (3 attempts, exponential backoff). |
+| Container | `V2__create_outbox_events_table.sql` | Migracion identica a payment/reservation. |
+| Container | `BeanConfiguration` | 6to use case bean registrado. |
+| Tests | 8 unit tests dominio, 4 unit tests aplicacion, 5 ITs | OutboxPublisherIT, OutboxAtomicityIT, RabbitMQ Testcontainer en 3 ITs existentes. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Domain events Customer | 4 lifecycle | 4 lifecycle + 2 SAGA |
+| Use cases Customer | 5 (CRUD + get) | 6 (+ValidateCustomerForReservation) |
+| Event publisher | Logger no-op | OutboxCustomerDomainEventPublisher |
+| RabbitMQ queues Customer | 0 | 3 + 1 DLQ |
+| `@RabbitListener` plataforma | 0 | 1 |
+| ITs Customer | 9 | 14 |
+| Total ITs plataforma | ~39 | ~44 |
+
+### Problemas encontrados y resueltos
+
+#### 1. La odisea de Testcontainers + Docker Desktop 4.62.0
+
+Este fue el problema mas complejo del ciclo y consumio la mayor parte del tiempo de debugging. Merece documentacion detallada porque afecta a **toda la plataforma**, no solo al Customer Service.
+
+**Sintoma inicial**: Al ejecutar `mvn verify` en customer-container, todos los ITs fallaban con:
+
+```
+Could not find a valid Docker environment.
+Please see logs and check configuration.
+Attempted configurations were:
+  NpipeSocketClientProviderStrategy: could not find docker endpoint
+As no valid configuration was found, execution cannot continue.
+```
+
+Seguido por un cacheo agresivo: `"Previous attempts to find a Docker environment failed. Will not retry."`
+
+**La pista falsa — el named pipe**: Docker Desktop 4.62.0 cambio el named pipe de `\\.\pipe\docker_engine` a `\\.\pipe\dockerDesktopLinuxEngine`. Esto nos llevo a investigar la ruta del pipe como causa raiz. Intentamos:
+
+1. Configurar `~/.testcontainers.properties` con `docker.host=npipe:////./pipe/dockerDesktopLinuxEngine`
+2. Setear la variable de entorno `DOCKER_HOST=npipe:////./pipe/dockerDesktopLinuxEngine`
+3. Verificar que Docker respondia correctamente: `docker info` y `docker run hello-world` funcionaban perfecto
+
+Nada de esto funciono. Testcontainers seguia cacheando el fallo y rechazando reintentar. Reiniciar Docker Desktop tampoco ayudo. Confirmar que el problema tambien afectaba a los ITs de Payment Service (que funcionaban en ciclos anteriores) descarto que fuera un problema de nuestro codigo nuevo.
+
+**La investigacion online que revelo la causa real**: Buscando en GitHub issues de testcontainers-java encontramos:
+
+- [Issue #11212](https://github.com/testcontainers/testcontainers-java/issues/11212): Docker 29.0.0 rompe Testcontainers porque requiere API version minima 1.44
+- [Issue #11422](https://github.com/testcontainers/testcontainers-java/issues/11422): Confirmacion en Windows con NpipeSocketClientProviderStrategy, Status 400
+
+**La causa raiz real**: No era el named pipe. Era la **version del Docker API**:
+
+| Componente | Version | API |
+|-----------|---------|-----|
+| Docker Desktop 4.62.0 | Engine 29.2.1 | Minima 1.44 |
+| Spring Boot 3.4.1 BOM | Testcontainers 1.20.4 | Default 1.32 |
+
+Testcontainers 1.20.4 enviaba requests con API version 1.32. Docker Engine 29.x las rechazaba con **Status 400 (Bad Request)** porque ya no acepta versiones por debajo de 1.44. Testcontainers interpretaba esto como "Docker no disponible", cacheaba el fallo, y se negaba a reintentar.
+
+**El fix aplicado (workaround inmediato)**: Crear `src/test/resources/docker-java.properties` con una sola linea:
+
+```properties
+api.version=1.44
+```
+
+Se creo en los 7 modulos que tienen ITs con Testcontainers:
+
+- `customer-service/customer-container`
+- `customer-service/customer-infrastructure`
+- `payment-service/payment-container`
+- `payment-service/payment-infrastructure`
+- `reservation-service/reservation-container`
+- `reservation-service/reservation-infrastructure`
+- `fleet-service/fleet-container`
+- `fleet-service/fleet-infrastructure`
+
+**Resultado**: Los 14 ITs de Customer y los 16 de Payment pasaron inmediatamente. El `mvn verify` completo de toda la plataforma (19 modulos) paso en 8:18 min.
+
+**Fix definitivo pendiente**: Overridear la version de Testcontainers en el parent POM:
+
+```xml
+<properties>
+    <testcontainers.version>1.21.4</testcontainers.version>
+</properties>
+```
+
+Testcontainers 1.21.4+ y 2.0.3+ incluyen el fix nativo para Docker 29.x (negociacion automatica de API version). Esto eliminaria la necesidad de los `docker-java.properties` en cada modulo. Lo dejamos como tarea para el proximo ciclo o como un mini-change de mantenimiento.
+
+**Cronologia del troubleshooting**:
+
+1. ITs fallan → sospechamos del named pipe cambiado
+2. Configuramos `~/.testcontainers.properties` → no funciona
+3. Configuramos `DOCKER_HOST` env var → no funciona
+4. Reiniciamos Docker Desktop → no funciona
+5. Verificamos que Payment ITs tambien fallan → descartamos error de codigo
+6. Investigamos online → encontramos GitHub issues sobre Docker 29 API version
+7. Creamos `docker-java.properties` con `api.version=1.44` → FUNCIONA
+8. Extendemos el fix a todos los modulos → `mvn verify` completo pasa
+
+**Moraleja**: El mensaje de error de Testcontainers ("could not find docker endpoint") es enganoso. No era que no encontrara Docker — lo encontraba, le hacia una peticion, Docker la rechazaba por version de API incorrecta, y Testcontainers lo reportaba como "Docker no disponible". Un mejor mensaje de error habria ahorrado horas de debugging.
+
+#### 2. NoUniqueBeanDefinitionException en CustomerValidationListener
+
+`CustomerValidationListener` tenia parametro `validateCustomerUseCase` que no coincidia con el nombre del bean `validateCustomerForReservationUseCase`. Spring no podia desambiguar entre el bean `customerApplicationService` (que implementa el interface) y el bean especifico del use case. Fix: renombrar parametro a `validateCustomerForReservationUseCase`.
+
+#### 3. spring-rabbit-test no gestionado en BOM
+
+Se intento agregar como dependencia test pero no esta en el parent BOM de Spring Boot 3.4.1 (no lo usa Payment tampoco). Se elimino.
+
+### Lecciones aprendidas
+
+- **SAGA events van con UUID crudo, no typed ID**: `reservationId` usa `java.util.UUID` (no `ReservationId`) para evitar dependencia cross-domain. Los typed IDs son para dentro del bounded context.
+- **Los SAGA response events no pasan por el aggregate**: Se crean directamente en el application service con `eventPublisher.publish(List.of(event))`. No se usa `registerDomainEvent()` ni `clearDomainEvents()` porque no hay mutacion de estado en el aggregate.
+- **El nombre del parametro del constructor importa**: Spring usa el nombre del parametro como fallback para desambiguar beans. Si hay N beans que implementan un interface, el parametro debe coincidir exactamente con el nombre del `@Bean` que se quiere inyectar.
+- **Docker API version es una bomba de tiempo**: Cuando Docker Desktop se actualiza, puede romper Testcontainers silenciosamente. Hay que vigilar la version de Testcontainers y mantenerla compatible con Docker Engine. El workaround de `docker-java.properties` con `api.version=1.44` funciona, pero el fix real es mantener Testcontainers actualizado. **Pendiente**: override de `<testcontainers.version>1.21.4</testcontainers.version>` en el parent POM.
+- **Los mensajes de error de Testcontainers son enganosos en Windows**: "Could not find docker endpoint" y "Previous attempts failed. Will not retry" no significan que Docker no este corriendo. Pueden significar que Docker rechazo la peticion por version de API incompatible (Status 400). Siempre verificar con `docker version` que API version requiere el engine antes de tocar configuracion de pipes o sockets.
+
+### Siguiente paso
+
+**Fleet Outbox + Messaging** — conectar Fleet Service al bus de mensajeria siguiendo el mismo patron que Customer. Sera el segundo servicio participante de SAGA.

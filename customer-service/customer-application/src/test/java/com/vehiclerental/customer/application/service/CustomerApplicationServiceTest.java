@@ -1,10 +1,13 @@
 package com.vehiclerental.customer.application.service;
 
+import com.vehiclerental.common.domain.event.DomainEvent;
 import com.vehiclerental.customer.application.dto.command.*;
 import com.vehiclerental.customer.application.dto.response.CustomerResponse;
 import com.vehiclerental.customer.application.exception.CustomerNotFoundException;
 import com.vehiclerental.customer.application.mapper.CustomerApplicationMapper;
 import com.vehiclerental.customer.application.port.output.CustomerDomainEventPublisher;
+import com.vehiclerental.customer.domain.event.CustomerRejectedEvent;
+import com.vehiclerental.customer.domain.event.CustomerValidatedEvent;
 import com.vehiclerental.customer.domain.model.aggregate.Customer;
 import com.vehiclerental.customer.domain.model.vo.CustomerId;
 import com.vehiclerental.customer.domain.model.vo.CustomerStatus;
@@ -23,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.lang.reflect.Method;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -199,6 +203,78 @@ class CustomerApplicationServiceTest {
     }
 
     @Nested
+    class ValidateCustomer {
+
+        private static final UUID RESERVATION_UUID = UUID.fromString("660e8400-e29b-41d4-a716-446655440000");
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void publishesValidatedEventWhenCustomerExistsAndIsActive() {
+            var customer = buildActiveCustomer();
+            when(customerRepository.findById(new CustomerId(CUSTOMER_UUID)))
+                    .thenReturn(Optional.of(customer));
+
+            var command = new ValidateCustomerCommand(CUSTOMER_ID_STR, RESERVATION_UUID.toString());
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> publishedEvents = eventsCaptor.getValue();
+
+            assertThat(publishedEvents).hasSize(1);
+            assertThat(publishedEvents.get(0)).isInstanceOf(CustomerValidatedEvent.class);
+            var validatedEvent = (CustomerValidatedEvent) publishedEvents.get(0);
+            assertThat(validatedEvent.customerId()).isEqualTo(new CustomerId(CUSTOMER_UUID));
+            assertThat(validatedEvent.reservationId()).isEqualTo(RESERVATION_UUID);
+
+            verify(customerRepository, never()).save(any());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void publishesRejectedEventWhenCustomerNotFound() {
+            when(customerRepository.findById(new CustomerId(CUSTOMER_UUID)))
+                    .thenReturn(Optional.empty());
+
+            var command = new ValidateCustomerCommand(CUSTOMER_ID_STR, RESERVATION_UUID.toString());
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> publishedEvents = eventsCaptor.getValue();
+
+            assertThat(publishedEvents).hasSize(1);
+            assertThat(publishedEvents.get(0)).isInstanceOf(CustomerRejectedEvent.class);
+            var rejectedEvent = (CustomerRejectedEvent) publishedEvents.get(0);
+            assertThat(rejectedEvent.reservationId()).isEqualTo(RESERVATION_UUID);
+            assertThat(rejectedEvent.failureMessages()).containsExactly("Customer not found: " + CUSTOMER_ID_STR);
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void publishesRejectedEventWhenCustomerNotActive() {
+            var customer = buildSuspendedCustomer();
+            when(customerRepository.findById(new CustomerId(CUSTOMER_UUID)))
+                    .thenReturn(Optional.of(customer));
+
+            var command = new ValidateCustomerCommand(CUSTOMER_ID_STR, RESERVATION_UUID.toString());
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> publishedEvents = eventsCaptor.getValue();
+
+            assertThat(publishedEvents).hasSize(1);
+            assertThat(publishedEvents.get(0)).isInstanceOf(CustomerRejectedEvent.class);
+            var rejectedEvent = (CustomerRejectedEvent) publishedEvents.get(0);
+            assertThat(rejectedEvent.reservationId()).isEqualTo(RESERVATION_UUID);
+            assertThat(rejectedEvent.failureMessages()).containsExactly("Customer is not active, current status: SUSPENDED");
+
+            verify(customerRepository, never()).save(any());
+        }
+    }
+
+    @Nested
     class AnnotationChecks {
 
         @Test
@@ -220,6 +296,11 @@ class CustomerApplicationServiceTest {
         @Test
         void getMethodIsReadOnlyTransactional() throws NoSuchMethodException {
             assertMethodIsTransactional("execute", GetCustomerCommand.class, true);
+        }
+
+        @Test
+        void validateMethodIsTransactionalNotReadOnly() throws NoSuchMethodException {
+            assertMethodIsTransactional("execute", ValidateCustomerCommand.class, false);
         }
 
         private void assertMethodIsTransactional(String methodName, Class<?> paramType, boolean readOnly)

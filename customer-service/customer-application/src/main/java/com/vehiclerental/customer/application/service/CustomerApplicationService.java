@@ -6,13 +6,19 @@ import com.vehiclerental.customer.application.exception.CustomerNotFoundExceptio
 import com.vehiclerental.customer.application.mapper.CustomerApplicationMapper;
 import com.vehiclerental.customer.application.port.input.*;
 import com.vehiclerental.customer.application.port.output.CustomerDomainEventPublisher;
+import com.vehiclerental.customer.domain.event.CustomerRejectedEvent;
+import com.vehiclerental.customer.domain.event.CustomerValidatedEvent;
 import com.vehiclerental.customer.domain.model.aggregate.Customer;
 import com.vehiclerental.customer.domain.model.vo.CustomerId;
+import com.vehiclerental.customer.domain.model.vo.CustomerStatus;
 import com.vehiclerental.customer.domain.model.vo.Email;
 import com.vehiclerental.customer.domain.model.vo.PhoneNumber;
 import com.vehiclerental.customer.domain.port.output.CustomerRepository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public class CustomerApplicationService implements
@@ -20,7 +26,8 @@ public class CustomerApplicationService implements
         GetCustomerUseCase,
         SuspendCustomerUseCase,
         ActivateCustomerUseCase,
-        DeleteCustomerUseCase {
+        DeleteCustomerUseCase,
+        ValidateCustomerForReservationUseCase {
 
     private final CustomerRepository customerRepository;
     private final CustomerDomainEventPublisher eventPublisher;
@@ -92,6 +99,37 @@ public class CustomerApplicationService implements
         customerRepository.save(customer);
         eventPublisher.publish(customer.getDomainEvents());
         customer.clearDomainEvents();
+    }
+
+    @Override
+    @Transactional
+    public void execute(ValidateCustomerCommand command) {
+        CustomerId customerId = new CustomerId(UUID.fromString(command.customerId()));
+        UUID reservationId = UUID.fromString(command.reservationId());
+
+        Optional<Customer> customerOpt = customerRepository.findById(customerId);
+
+        if (customerOpt.isEmpty()) {
+            var rejectedEvent = new CustomerRejectedEvent(
+                    UUID.randomUUID(), Instant.now(), customerId, reservationId,
+                    List.of("Customer not found: " + command.customerId()));
+            eventPublisher.publish(List.of(rejectedEvent));
+            return;
+        }
+
+        Customer customer = customerOpt.get();
+
+        if (customer.getStatus() != CustomerStatus.ACTIVE) {
+            var rejectedEvent = new CustomerRejectedEvent(
+                    UUID.randomUUID(), Instant.now(), customerId, reservationId,
+                    List.of("Customer is not active, current status: " + customer.getStatus()));
+            eventPublisher.publish(List.of(rejectedEvent));
+            return;
+        }
+
+        var validatedEvent = new CustomerValidatedEvent(
+                UUID.randomUUID(), Instant.now(), customerId, reservationId);
+        eventPublisher.publish(List.of(validatedEvent));
     }
 
     private Customer findCustomerOrThrow(CustomerId customerId, String rawId) {

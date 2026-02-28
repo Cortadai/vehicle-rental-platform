@@ -4,39 +4,15 @@ customer-event-publisher
 Purpose
 -------
 
-Domain event publisher adapter for Customer Service. Implements the application output port as a logger-based no-op. Provides observability for events while deferring real messaging (RabbitMQ/Outbox) to a future change.
+Domain event publisher adapter for Customer Service. Implements the application output port via OutboxCustomerDomainEventPublisher, which persists events to the outbox table for reliable delivery. The full implementation is specified in the `customer-outbox-publishing` capability.
 
-## ADDED Requirements
+## Requirements
 
-### Requirement: CustomerDomainEventPublisherAdapter implements output port
+### Requirement: Infrastructure layer only
 
-CustomerDomainEventPublisherAdapter SHALL implement `CustomerDomainEventPublisher` from the application layer. It SHALL log each event using SLF4J.
+The event publisher adapter SHALL live in `com.vehiclerental.customer.infrastructure.adapter.output.event`. The implementation class is `OutboxCustomerDomainEventPublisher`.
 
-#### Scenario: Publishes events by logging
+#### Scenario: Outbox publisher is in correct package
 
-- **WHEN** `publish(List<DomainEvent>)` is called with a list of domain events
-- **THEN** it SHALL log each event's class name and event ID using SLF4J at INFO level
-
-#### Scenario: Handles empty event list
-
-- **WHEN** `publish(List<DomainEvent>)` is called with an empty list
-- **THEN** it SHALL NOT log any events and SHALL NOT throw an exception
-
-#### Scenario: Adapter is a Spring component
-
-- **WHEN** CustomerDomainEventPublisherAdapter is inspected
-- **THEN** it SHALL be annotated with `@Component`
-
-### Requirement: No messaging infrastructure dependency
-
-CustomerDomainEventPublisherAdapter SHALL NOT depend on RabbitMQ, Kafka, or any messaging library. It SHALL only use SLF4J for logging.
-
-#### Scenario: No messaging imports
-
-- **WHEN** CustomerDomainEventPublisherAdapter imports are inspected
-- **THEN** it SHALL NOT import any type from `org.springframework.amqp.*`, `org.apache.kafka.*`, or `org.springframework.jms.*`
-
-Constraint: Infrastructure layer only
---------------------------------------
-
-The event publisher adapter SHALL live in `com.vehiclerental.customer.infrastructure.adapter.output.event`.
+- **WHEN** OutboxCustomerDomainEventPublisher is inspected
+- **THEN** it SHALL be in package `com.vehiclerental.customer.infrastructure.adapter.output.event`

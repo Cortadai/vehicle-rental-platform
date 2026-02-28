@@ -9,6 +9,7 @@ import com.vehiclerental.customer.infrastructure.adapter.output.persistence.mapp
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+
 @Configuration
 public class BeanConfiguration {
 
@@ -52,6 +53,11 @@ public class BeanConfiguration {
 
     @Bean
     public DeleteCustomerUseCase deleteCustomerUseCase(CustomerApplicationService service) {
+        return service;
+    }
+
+    @Bean
+    public ValidateCustomerForReservationUseCase validateCustomerForReservationUseCase(CustomerApplicationService service) {
         return service;
     }
 }

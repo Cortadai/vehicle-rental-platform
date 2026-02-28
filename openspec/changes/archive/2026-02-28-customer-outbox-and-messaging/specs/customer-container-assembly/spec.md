@@ -1,12 +1,4 @@
-customer-container-assembly
-===========================
-
-Purpose
--------
-
-Spring Boot assembly module for Customer Service. Contains the main application class, manual bean registration for domain and application layers, and configuration files. This is the only module with `spring-boot-maven-plugin` (executable JAR).
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: CustomerServiceApplication is the Spring Boot entry point
 
@@ -153,8 +145,3 @@ The customer-container POM SHALL include `spring-boot-maven-plugin`. No other cu
 
 - **WHEN** `customer-service/customer-infrastructure/pom.xml` is inspected
 - **THEN** it SHALL NOT declare `spring-boot-maven-plugin`
-
-Constraint: Container is the assembly layer
---------------------------------------------
-
-BeanConfiguration SHALL live in `com.vehiclerental.customer.config`. CustomerServiceApplication SHALL live in `com.vehiclerental.customer`. No business logic SHALL exist in the container module.
