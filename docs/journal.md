@@ -2294,3 +2294,61 @@ Se intento agregar como dependencia test pero no esta en el parent BOM de Spring
 ### Siguiente paso
 
 **Fleet Outbox + Messaging** — conectar Fleet Service al bus de mensajeria siguiendo el mismo patron que Customer. Sera el segundo servicio participante de SAGA.
+
+---
+
+## Ciclo #19: fleet-outbox-and-messaging (2026-03-06)
+
+### Que se hizo
+
+Conectar Fleet Service al bus de mensajeria via Outbox Pattern. Fleet es el segundo servicio **participante** de SAGA: recibe dos comandos via RabbitMQ (confirm availability y release reservation), ejecuta logica de negocio, y responde con eventos (confirmed/rejected/released) a traves del outbox. Tambien es el primer servicio con **compensacion**: el release command es idempotente y siempre publica FleetReleasedEvent sin tocar el aggregate.
+
+### Cambios implementados
+
+| Capa | Ficheros | Descripcion |
+|------|----------|-------------|
+| Domain | `FleetConfirmedEvent`, `FleetRejectedEvent`, `FleetReleasedEvent` | 3 nuevos records de SAGA response. Usan `reservationId` (UUID crudo) para correlacion. FleetRejectedEvent incluye `failureMessages: List<String>`. |
+| Application | `ConfirmFleetAvailabilityCommand`, `ReleaseFleetReservationCommand`, 2 use case interfaces, `FleetApplicationService` | 6to y 7mo interfaces implementados. Confirm busca vehicle y valida ACTIVE; Release es idempotente (no toca aggregate). |
+| Infrastructure | `OutboxFleetDomainEventPublisher` | Reemplaza el logger no-op. 7 instanceof checks, explicit Map para routing keys (no auto-derivation como Customer, por naming mixto Vehicle*/Fleet*). |
+| Infrastructure | `RabbitMQConfig` | TopicExchange, 4 queues (confirmed, rejected, confirm.command, release.command), per-queue DLQ routing keys, DirectExchange DLX. |
+| Infrastructure | `FleetConfirmationListener`, `FleetReleaseListener` | 2 `@RabbitListener`, uno por comando SAGA. Parsean raw Message con ObjectMapper. |
+| Container | `FleetServiceApplication` | `@EntityScan` + `@EnableJpaRepositories` para cross-module JPA scanning de common-messaging. |
+| Container | `application.yml` | RabbitMQ connection + listener retry (3 attempts, exponential backoff). |
+| Container | `V2__create_outbox_events_table.sql` | Migracion identica a customer/payment/reservation. |
+| Container | `BeanConfiguration` | 6to y 7mo use case beans registrados. |
+| Platform | `definitions.json` | `fleet.release.command.queue` + binding + DLQ binding (total command queues: 5). |
+| Tests | 9 unit tests dominio, 5 unit tests aplicacion, 5 ITs | OutboxPublisherIT, OutboxAtomicityIT, RabbitMQ Testcontainer en 3 ITs existentes. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Domain events Fleet | 4 lifecycle | 4 lifecycle + 3 SAGA |
+| Use cases Fleet | 5 (CRUD + get) | 7 (+ConfirmFleetAvailability, +ReleaseFleetReservation) |
+| Event publisher | Logger no-op | OutboxFleetDomainEventPublisher |
+| RabbitMQ queues Fleet | 0 | 4 + 1 DLQ |
+| `@RabbitListener` plataforma | 1 (Customer) | 3 (+2 Fleet) |
+| ITs Fleet | 10 | 15 |
+| Command queues en definitions.json | 4 | 5 |
+
+### Problemas encontrados y resueltos
+
+#### 1. UnnecessaryStubbingException en ReleaseFleetReservation tests
+
+Los tests iniciales para `execute(ReleaseFleetReservationCommand)` stubbeaban `vehicleRepository.findById()`, pero la implementacion es un no-op sobre el aggregate — publica FleetReleasedEvent directamente sin buscar el vehicle. Mockito strict stubbing detecto los stubs innecesarios.
+
+**Fix**: Eliminar los stubs del repository. Reemplazar `vehicleNotFoundStillPublishesFleetReleasedEvent` por `doesNotCallSaveOrClearDomainEvents` que verifica que `vehicleRepository.findById()` nunca se invoca.
+
+**Moraleja**: Cuando un use case de compensacion es idempotente y no necesita el aggregate, los tests deben reflejar esa decision de diseno — no asumir que siempre se busca la entidad.
+
+### Lecciones aprendidas
+
+- **Fleet usa Map explicito para routing keys, no auto-derivation**: A diferencia de Customer/Payment donde los eventos se llaman `Customer*Event` y el routing key se deriva automaticamente del nombre de la clase, Fleet tiene naming mixto (`Vehicle*Event` para lifecycle, `Fleet*Event` para SAGA). Un `Map<Class, String>` explicito es mas claro y evita errores de derivacion.
+- **Compensacion idempotente no requiere el aggregate**: `ReleaseFleetReservationUseCase` no hace `findById()` ni `save()`. Simplemente construye un `VehicleId` desde el command string y publica `FleetReleasedEvent`. Esto es correcto porque no hay modelo de `vehicle_reservations` todavia — el release solo notifica al orquestador.
+- **Dos listeners, un servicio**: Fleet es el primer servicio con 2 `@RabbitListener` (confirm + release). Cada listener tiene su propia command queue, lo que permite scaling y DLQ independientes.
+- **El patron outbox ya es mecanico**: Tercera vez implementandolo (tras Payment y Customer). El flujo es predecible: delete logger adapter → create outbox publisher → add RabbitMQConfig → add listeners → update container scanning → V2 migration → fix existing ITs con RabbitMQ container.
+- **35 tasks en un solo ciclo es manejable**: Con el patron establecido y los servicios anteriores como referencia, 35 tasks se implementaron sin bloqueos significativos. La unica friccion fue el strict stubbing de Mockito (facil de resolver).
+
+### Siguiente paso
+
+**Reservation Outbox + Messaging refinement** o **SAGA Orchestrator** — el reservation-service ya tiene outbox, pero podria necesitar ajustes para los nuevos command/response queues de Fleet. El paso mas ambicioso seria empezar el orquestador SAGA en reservation-service.
