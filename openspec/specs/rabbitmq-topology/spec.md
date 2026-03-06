@@ -4,7 +4,7 @@
 
 RabbitMQ exchange, queue, binding, and dead-letter queue topology for Reservation Service. Pre-loaded via `definitions.json` for the full platform and declared as Spring beans for the Reservation Service scope.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Reservation exchange declared as TopicExchange
 
@@ -69,7 +69,7 @@ The `docker/rabbitmq/definitions.json` file SHALL define the complete RabbitMQ t
 #### Scenario: All service queues declared
 
 - **WHEN** RabbitMQ starts with `definitions.json` loaded
-- **THEN** the following durable queues SHALL exist with DLQ routing to `dlx.exchange`: `reservation.created.queue`, `customer.validated.queue`, `customer.rejected.queue`, `payment.completed.queue`, `payment.failed.queue`, `fleet.confirmed.queue`, `fleet.rejected.queue`
+- **THEN** the following durable queues SHALL exist with DLQ routing to `dlx.exchange`: `reservation.created.queue`, `customer.validated.queue`, `customer.rejected.queue`, `payment.completed.queue`, `payment.failed.queue`, `fleet.confirmed.queue`, `fleet.rejected.queue`, `fleet.release.command.queue`
 
 #### Scenario: All DLQ queues declared
 
@@ -101,7 +101,7 @@ The RabbitMQ container SHALL load its topology from a definitions file at startu
 
 ### Requirement: Command queues for SAGA orchestration
 
-The `docker/rabbitmq/definitions.json` SHALL declare 4 command queues for SAGA orchestration. Each command queue is bound to the receiver service's exchange (not the orchestrator's exchange), following the convention that each service owns its exchange.
+The `docker/rabbitmq/definitions.json` SHALL declare 5 command queues for SAGA orchestration. Each command queue is bound to the receiver service's exchange (not the orchestrator's exchange), following the convention that each service owns its exchange.
 
 #### Scenario: customer.validate.command.queue exists in definitions.json
 
@@ -131,6 +131,13 @@ The `docker/rabbitmq/definitions.json` SHALL declare 4 command queues for SAGA o
 - **AND** it SHALL have `x-dead-letter-exchange` set to `"dlx.exchange"`
 - **AND** it SHALL have `x-dead-letter-routing-key` set to `"fleet.confirm.command.dlq"`
 
+#### Scenario: fleet.release.command.queue exists in definitions.json
+
+- **WHEN** `definitions.json` is inspected
+- **THEN** it SHALL declare a durable queue `"fleet.release.command.queue"`
+- **AND** it SHALL have `x-dead-letter-exchange` set to `"dlx.exchange"`
+- **AND** it SHALL have `x-dead-letter-routing-key` set to `"fleet.release.command.dlq"`
+
 ### Requirement: Command queue bindings use receiver's exchange
 
 Each command queue SHALL be bound to the exchange of the service that will consume the command, with routing key `{service}.{action}.command`.
@@ -155,6 +162,11 @@ Each command queue SHALL be bound to the exchange of the service that will consu
 - **WHEN** `definitions.json` is inspected
 - **THEN** it SHALL declare a binding from `"fleet.exchange"` to `"fleet.confirm.command.queue"` with routing key `"fleet.confirm.command"`
 
+#### Scenario: fleet.release.command.queue binding
+
+- **WHEN** `definitions.json` is inspected
+- **THEN** it SHALL declare a binding from `"fleet.exchange"` to `"fleet.release.command.queue"` with routing key `"fleet.release.command"`
+
 ### Requirement: Command queue DLQ bindings route to receiver's DLQ
 
 Each command queue's dead letters SHALL be routed to the DLQ of the receiver service via `dlx.exchange`.
@@ -178,6 +190,11 @@ Each command queue's dead letters SHALL be routed to the DLQ of the receiver ser
 
 - **WHEN** `definitions.json` is inspected
 - **THEN** it SHALL declare a binding from `"dlx.exchange"` to `"fleet.dlq"` with routing key `"fleet.confirm.command.dlq"`
+
+#### Scenario: fleet.release.command DLQ binding
+
+- **WHEN** `definitions.json` is inspected
+- **THEN** it SHALL declare a binding from `"dlx.exchange"` to `"fleet.dlq"` with routing key `"fleet.release.command.dlq"`
 
 ## Constraint: RabbitMQConfig location
 

@@ -1,12 +1,4 @@
-fleet-container-assembly
-========================
-
-Purpose
--------
-
-Spring Boot assembly module for Fleet Service. Contains the main application class, manual bean registration for domain and application layers, and configuration files. This is the only module with `spring-boot-maven-plugin` (executable JAR).
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: FleetServiceApplication is the Spring Boot entry point
 

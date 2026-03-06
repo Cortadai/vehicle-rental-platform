@@ -4,39 +4,14 @@ fleet-event-publisher
 Purpose
 -------
 
-Domain event publisher adapter for Fleet Service. Implements the application output port as a logger-based no-op. Provides observability for events while deferring real messaging (RabbitMQ/Outbox) to a future change.
-
-## ADDED Requirements
-
-### Requirement: FleetDomainEventPublisherAdapter implements output port
-
-FleetDomainEventPublisherAdapter SHALL implement `FleetDomainEventPublisher` from the application layer. It SHALL log each event using SLF4J.
-
-#### Scenario: Publishes events by logging
-
-- **WHEN** `publish(List<DomainEvent>)` is called with a list of domain events
-- **THEN** it SHALL log each event's class name and event ID using SLF4J at INFO level
-
-#### Scenario: Handles empty event list
-
-- **WHEN** `publish(List<DomainEvent>)` is called with an empty list
-- **THEN** it SHALL NOT log any events and SHALL NOT throw an exception
-
-#### Scenario: Adapter is a Spring component
-
-- **WHEN** FleetDomainEventPublisherAdapter is inspected
-- **THEN** it SHALL be annotated with `@Component`
-
-### Requirement: No messaging infrastructure dependency
-
-FleetDomainEventPublisherAdapter SHALL NOT depend on RabbitMQ, Kafka, or any messaging library. It SHALL only use SLF4J for logging.
-
-#### Scenario: No messaging imports
-
-- **WHEN** FleetDomainEventPublisherAdapter imports are inspected
-- **THEN** it SHALL NOT import any type from `org.springframework.amqp.*`, `org.apache.kafka.*`, or `org.springframework.jms.*`
+Domain event publisher adapter for Fleet Service. Implements the application output port via `OutboxFleetDomainEventPublisher`, which persists events to the outbox table for reliable publishing to RabbitMQ. The adapter is fully specified in the `fleet-outbox-publishing` capability.
 
 Constraint: Infrastructure layer only
 --------------------------------------
 
-The event publisher adapter SHALL live in `com.vehiclerental.fleet.infrastructure.adapter.output.event`.
+The event publisher adapter SHALL live in `com.vehiclerental.fleet.infrastructure.adapter.output.event`. The implementation class is `OutboxFleetDomainEventPublisher`.
+
+#### Scenario: Outbox publisher is in correct package
+
+- **WHEN** OutboxFleetDomainEventPublisher is inspected
+- **THEN** it SHALL be in package `com.vehiclerental.fleet.infrastructure.adapter.output.event`
