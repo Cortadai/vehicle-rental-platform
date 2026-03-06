@@ -54,4 +54,14 @@ public class BeanConfiguration {
     public RetireVehicleUseCase retireVehicleUseCase(FleetApplicationService service) {
         return service;
     }
+
+    @Bean
+    public ConfirmFleetAvailabilityUseCase confirmFleetAvailabilityUseCase(FleetApplicationService service) {
+        return service;
+    }
+
+    @Bean
+    public ReleaseFleetReservationUseCase releaseFleetReservationUseCase(FleetApplicationService service) {
+        return service;
+    }
 }

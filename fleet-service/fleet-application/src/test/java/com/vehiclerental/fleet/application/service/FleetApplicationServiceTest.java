@@ -1,11 +1,15 @@
 package com.vehiclerental.fleet.application.service;
 
+import com.vehiclerental.common.domain.event.DomainEvent;
 import com.vehiclerental.common.domain.vo.Money;
 import com.vehiclerental.fleet.application.dto.command.*;
 import com.vehiclerental.fleet.application.dto.response.VehicleResponse;
 import com.vehiclerental.fleet.application.exception.VehicleNotFoundException;
 import com.vehiclerental.fleet.application.mapper.FleetApplicationMapper;
 import com.vehiclerental.fleet.application.port.output.FleetDomainEventPublisher;
+import com.vehiclerental.fleet.domain.event.FleetConfirmedEvent;
+import com.vehiclerental.fleet.domain.event.FleetRejectedEvent;
+import com.vehiclerental.fleet.domain.event.FleetReleasedEvent;
 import com.vehiclerental.fleet.domain.model.aggregate.Vehicle;
 import com.vehiclerental.fleet.domain.model.vo.*;
 import com.vehiclerental.fleet.domain.port.output.VehicleRepository;
@@ -23,6 +27,7 @@ import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -202,6 +207,116 @@ class FleetApplicationServiceTest {
     }
 
     @Nested
+    class ConfirmFleetAvailability {
+
+        private static final UUID RESERVATION_UUID = UUID.fromString("660e8400-e29b-41d4-a716-446655440000");
+        private static final String RESERVATION_ID_STR = RESERVATION_UUID.toString();
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void vehicleActivePublishesFleetConfirmedEvent() {
+            var vehicle = buildActiveVehicle();
+            when(vehicleRepository.findById(new VehicleId(VEHICLE_UUID)))
+                    .thenReturn(Optional.of(vehicle));
+
+            var command = new ConfirmFleetAvailabilityCommand(VEHICLE_ID_STR, RESERVATION_ID_STR, "2025-02-01", "2025-02-04");
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> events = eventsCaptor.getValue();
+
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0)).isInstanceOf(FleetConfirmedEvent.class);
+            var confirmed = (FleetConfirmedEvent) events.get(0);
+            assertThat(confirmed.vehicleId()).isEqualTo(new VehicleId(VEHICLE_UUID));
+            assertThat(confirmed.reservationId()).isEqualTo(RESERVATION_UUID);
+
+            verify(vehicleRepository, never()).save(any());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void vehicleNotFoundPublishesFleetRejectedEvent() {
+            when(vehicleRepository.findById(new VehicleId(VEHICLE_UUID)))
+                    .thenReturn(Optional.empty());
+
+            var command = new ConfirmFleetAvailabilityCommand(VEHICLE_ID_STR, RESERVATION_ID_STR, "2025-02-01", "2025-02-04");
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> events = eventsCaptor.getValue();
+
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0)).isInstanceOf(FleetRejectedEvent.class);
+            var rejected = (FleetRejectedEvent) events.get(0);
+            assertThat(rejected.reservationId()).isEqualTo(RESERVATION_UUID);
+            assertThat(rejected.failureMessages()).containsExactly("Vehicle not found: " + VEHICLE_ID_STR);
+
+            verify(vehicleRepository, never()).save(any());
+        }
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void vehicleNotActivePublishesFleetRejectedEvent() {
+            var vehicle = buildUnderMaintenanceVehicle();
+            when(vehicleRepository.findById(new VehicleId(VEHICLE_UUID)))
+                    .thenReturn(Optional.of(vehicle));
+
+            var command = new ConfirmFleetAvailabilityCommand(VEHICLE_ID_STR, RESERVATION_ID_STR, "2025-02-01", "2025-02-04");
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> events = eventsCaptor.getValue();
+
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0)).isInstanceOf(FleetRejectedEvent.class);
+            var rejected = (FleetRejectedEvent) events.get(0);
+            assertThat(rejected.reservationId()).isEqualTo(RESERVATION_UUID);
+            assertThat(rejected.failureMessages()).containsExactly("Vehicle is not available, current status: UNDER_MAINTENANCE");
+
+            verify(vehicleRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    class ReleaseFleetReservation {
+
+        private static final UUID RESERVATION_UUID = UUID.fromString("660e8400-e29b-41d4-a716-446655440000");
+        private static final String RESERVATION_ID_STR = RESERVATION_UUID.toString();
+
+        @Test
+        @SuppressWarnings("unchecked")
+        void vehicleExistsPublishesFleetReleasedEvent() {
+            var command = new ReleaseFleetReservationCommand(VEHICLE_ID_STR, RESERVATION_ID_STR);
+            service.execute(command);
+
+            var eventsCaptor = ArgumentCaptor.forClass(List.class);
+            verify(eventPublisher).publish(eventsCaptor.capture());
+            List<DomainEvent> events = eventsCaptor.getValue();
+
+            assertThat(events).hasSize(1);
+            assertThat(events.get(0)).isInstanceOf(FleetReleasedEvent.class);
+            var released = (FleetReleasedEvent) events.get(0);
+            assertThat(released.vehicleId()).isEqualTo(new VehicleId(VEHICLE_UUID));
+            assertThat(released.reservationId()).isEqualTo(RESERVATION_UUID);
+
+            verify(vehicleRepository, never()).save(any());
+        }
+
+        @Test
+        void doesNotCallSaveOrClearDomainEvents() {
+            var command = new ReleaseFleetReservationCommand(VEHICLE_ID_STR, RESERVATION_ID_STR);
+            service.execute(command);
+
+            verify(vehicleRepository, never()).save(any());
+            verify(vehicleRepository, never()).findById(any());
+        }
+    }
+
+    @Nested
     class AnnotationChecks {
 
         @Test
@@ -218,6 +333,8 @@ class FleetApplicationServiceTest {
             assertMethodIsTransactional("execute", SendToMaintenanceCommand.class, false);
             assertMethodIsTransactional("execute", ActivateVehicleCommand.class, false);
             assertMethodIsTransactional("execute", RetireVehicleCommand.class, false);
+            assertMethodIsTransactional("execute", ConfirmFleetAvailabilityCommand.class, false);
+            assertMethodIsTransactional("execute", ReleaseFleetReservationCommand.class, false);
         }
 
         @Test

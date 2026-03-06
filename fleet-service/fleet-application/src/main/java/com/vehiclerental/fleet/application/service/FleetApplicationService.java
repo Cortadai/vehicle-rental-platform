@@ -7,15 +7,21 @@ import com.vehiclerental.fleet.application.exception.VehicleNotFoundException;
 import com.vehiclerental.fleet.application.mapper.FleetApplicationMapper;
 import com.vehiclerental.fleet.application.port.input.*;
 import com.vehiclerental.fleet.application.port.output.FleetDomainEventPublisher;
+import com.vehiclerental.fleet.domain.event.FleetConfirmedEvent;
+import com.vehiclerental.fleet.domain.event.FleetRejectedEvent;
+import com.vehiclerental.fleet.domain.event.FleetReleasedEvent;
 import com.vehiclerental.fleet.domain.model.aggregate.Vehicle;
 import com.vehiclerental.fleet.domain.model.vo.DailyRate;
 import com.vehiclerental.fleet.domain.model.vo.LicensePlate;
 import com.vehiclerental.fleet.domain.model.vo.VehicleCategory;
 import com.vehiclerental.fleet.domain.model.vo.VehicleId;
+import com.vehiclerental.fleet.domain.model.vo.VehicleStatus;
 import com.vehiclerental.fleet.domain.port.output.VehicleRepository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Currency;
+import java.util.List;
 import java.util.UUID;
 
 public class FleetApplicationService implements
@@ -23,7 +29,9 @@ public class FleetApplicationService implements
         GetVehicleUseCase,
         SendToMaintenanceUseCase,
         ActivateVehicleUseCase,
-        RetireVehicleUseCase {
+        RetireVehicleUseCase,
+        ConfirmFleetAvailabilityUseCase,
+        ReleaseFleetReservationUseCase {
 
     private final VehicleRepository vehicleRepository;
     private final FleetDomainEventPublisher eventPublisher;
@@ -98,6 +106,47 @@ public class FleetApplicationService implements
         vehicleRepository.save(vehicle);
         eventPublisher.publish(vehicle.getDomainEvents());
         vehicle.clearDomainEvents();
+    }
+
+    @Override
+    @Transactional
+    public void execute(ConfirmFleetAvailabilityCommand command) {
+        VehicleId vehicleId = new VehicleId(UUID.fromString(command.vehicleId()));
+        UUID reservationId = UUID.fromString(command.reservationId());
+
+        var vehicleOpt = vehicleRepository.findById(vehicleId);
+
+        if (vehicleOpt.isEmpty()) {
+            var rejectedEvent = new FleetRejectedEvent(
+                    UUID.randomUUID(), Instant.now(), vehicleId, reservationId,
+                    List.of("Vehicle not found: " + command.vehicleId()));
+            eventPublisher.publish(List.of(rejectedEvent));
+            return;
+        }
+
+        Vehicle vehicle = vehicleOpt.get();
+        if (vehicle.getStatus() != VehicleStatus.ACTIVE) {
+            var rejectedEvent = new FleetRejectedEvent(
+                    UUID.randomUUID(), Instant.now(), vehicleId, reservationId,
+                    List.of("Vehicle is not available, current status: " + vehicle.getStatus()));
+            eventPublisher.publish(List.of(rejectedEvent));
+            return;
+        }
+
+        var confirmedEvent = new FleetConfirmedEvent(
+                UUID.randomUUID(), Instant.now(), vehicleId, reservationId);
+        eventPublisher.publish(List.of(confirmedEvent));
+    }
+
+    @Override
+    @Transactional
+    public void execute(ReleaseFleetReservationCommand command) {
+        VehicleId vehicleId = new VehicleId(UUID.fromString(command.vehicleId()));
+        UUID reservationId = UUID.fromString(command.reservationId());
+
+        var releasedEvent = new FleetReleasedEvent(
+                UUID.randomUUID(), Instant.now(), vehicleId, reservationId);
+        eventPublisher.publish(List.of(releasedEvent));
     }
 
     private Vehicle findVehicleOrThrow(VehicleId vehicleId, String rawId) {

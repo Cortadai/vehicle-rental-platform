@@ -217,6 +217,16 @@
         "x-dead-letter-exchange": "dlx.exchange",
         "x-dead-letter-routing-key": "fleet.confirm.command.dlq"
       }
+    },
+    {
+      "name": "fleet.release.command.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "dlx.exchange",
+        "x-dead-letter-routing-key": "fleet.release.command.dlq"
+      }
     }
   ],
   "bindings": [
@@ -410,6 +420,22 @@
       "destination": "fleet.dlq",
       "destination_type": "queue",
       "routing_key": "fleet.confirm.command.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "fleet.exchange",
+      "vhost": "/",
+      "destination": "fleet.release.command.queue",
+      "destination_type": "queue",
+      "routing_key": "fleet.release.command",
+      "arguments": {}
+    },
+    {
+      "source": "dlx.exchange",
+      "vhost": "/",
+      "destination": "fleet.dlq",
+      "destination_type": "queue",
+      "routing_key": "fleet.release.command.dlq",
       "arguments": {}
     }
   ]

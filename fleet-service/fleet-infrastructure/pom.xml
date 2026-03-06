@@ -24,6 +24,10 @@
             <groupId>com.vehiclerental</groupId>
             <artifactId>fleet-application</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>common-messaging</artifactId>
+        </dependency>
 
         <!-- Spring Boot Starters -->
         <dependency>
