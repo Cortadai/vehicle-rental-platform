@@ -32,14 +32,18 @@
 - [x] V2__create_outbox_events_table.sql
 - [x] docker-java.properties api.version=1.44 (workaround Docker 29.x / Testcontainers 1.20.4)
 
-## Change 3: fleet-outbox-and-messaging [PENDIENTE]
+## Change 3: fleet-outbox-and-messaging [COMPLETADO]
 
-- [ ] Outbox infrastructure (mecanico, copia de Payment)
-- [ ] @EntityScan + @EnableJpaRepositories + scanBasePackages
-- [ ] FleetConfirmedEvent + FleetRejectedEvent
-- [ ] ConfirmFleetAvailabilityUseCase + ReleaseFleetReservationUseCase
-- [ ] FleetConfirmationListener (@RabbitListener)
-- [ ] RabbitMQContainer en todos los ITs
+- [x] Outbox infrastructure (OutboxFleetDomainEventPublisher reemplaza logger no-op)
+- [x] @EntityScan + @EnableJpaRepositories + scanBasePackages
+- [x] FleetConfirmedEvent + FleetRejectedEvent + FleetReleasedEvent (3 SAGA events)
+- [x] ConfirmFleetAvailabilityUseCase + ReleaseFleetReservationUseCase (6to y 7mo interface)
+- [x] FleetConfirmationListener + FleetReleaseListener (2 @RabbitListeners)
+- [x] RabbitMQConfig (fleet.exchange, 4 queues, per-queue DLQ routing keys)
+- [x] RabbitMQContainer en todos los ITs (3 existentes + 2 nuevos)
+- [x] OutboxPublisherIT + OutboxAtomicityIT
+- [x] V2__create_outbox_events_table.sql
+- [x] fleet.release.command.queue en definitions.json (5to command queue)
 
 ## Change 4: reservation-saga-orchestration [PENDIENTE]
 
