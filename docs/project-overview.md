@@ -73,8 +73,8 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 21 changes completados — SAGA Orchestration OPERATIVA
- =======================================================
+ 22 changes completados — SAGA Orchestration + JaCoCo permanente
+ ================================================================
 
   #1  parent-pom-multi-module          }
   #2  customer-domain                  }
@@ -99,7 +99,9 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #18 customer-outbox-and-messaging    }  Participante SAGA
   #19 fleet-outbox-and-messaging       }  Participante SAGA
   #20 payment-saga-participation       }  Participante SAGA
-  #21 reservation-saga-orchestration   }  SAGA Orchestrator  ← COMPLETADO
+  #21 reservation-saga-orchestration   }  SAGA Orchestrator
+
+  #22 jacoco-permanent-coverage        }  Quality Gate  ← COMPLETADO
 ```
 
 ## Flujo SAGA End-to-End
@@ -252,7 +254,8 @@ Cobertura por capa (lineas):
   | TOTAL                     |   492 |           |
   +---------------------------+-------+-----------+
 
-  Generado con: mvn clean verify -Pcoverage
+  JaCoCo permanente (sin profile). Umbrales: domain/common 80%,
+  application 75%, infrastructure 60%. Containers excluidos.
 ```
 
 ## Patrones Implementados
@@ -270,6 +273,7 @@ Cobertura por capa (lineas):
   | Typed IDs          | ReservationId, PaymentId, etc. (records)   |
   | Optimistic Locking | @Version en SagaState para concurrencia    |
   | Test Strategy      | Domain Test-First, Infra Test-After        |
+  | JaCoCo Enforcement | Permanente: 80/75/60% por capa             |
   +--------------------+--------------------------------------------+
 ```
 
@@ -285,9 +289,9 @@ Cobertura por capa (lineas):
   [x] Topologia RabbitMQ completa     [ ] E2E test (Docker Compose)
   [x] 12 @RabbitListeners             [ ] ArchUnit tests
   [x] SAGA Orchestrator               [ ] OpenAPI docs
-  [x] Compensation flows              [ ] JaCoCo permanente
+  [x] Compensation flows
   [x] 492 tests pasando
-  [x] JaCoCo (profile)
+  [x] JaCoCo permanente (80/75/60%)
 ```
 
 ## Stack Tecnologico
@@ -297,5 +301,5 @@ Cobertura por capa (lineas):
   PostgreSQL | Flyway | Spring Data JPA
   RabbitMQ | Spring AMQP | Outbox Pattern
   JUnit 5 | Mockito | Testcontainers | Awaitility
-  JaCoCo (via -Pcoverage) | Lombok
+  JaCoCo 0.8.12 (permanente, check con umbrales) | Lombok
 ```

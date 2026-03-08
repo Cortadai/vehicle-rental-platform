@@ -97,5 +97,5 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] OpenAPI documentation
 - [ ] README para developers
 - [ ] Evaluar MapStruct vs mappers manuales
-- [ ] JaCoCo permanente con umbrales
+- [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
 - [ ] Tests para ApiMetadata/ApiResponse en common
