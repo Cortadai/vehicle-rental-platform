@@ -2409,3 +2409,101 @@ El `OutboxPaymentDomainEventPublisher.extractAggregateId()` usa `e.paymentId().v
 ### Siguiente paso
 
 **SAGA Orchestrator** en reservation-service — el unico paso que queda antes de tener el flujo completo de reserva funcionando end-to-end.
+
+---
+
+## Ciclo #21: reservation-saga-orchestration (2026-03-08)
+
+### Que se hizo
+
+Implementar el SAGA Orchestrator completo en reservation-service. Este es el change mas ambicioso del proyecto: 43 tasks en 11 secciones que cruzan las 4 capas de la arquitectura hexagonal. El orquestador coordina el flujo secuencial Customer Validation → Payment Processing → Fleet Confirmation, con compensacion inversa (rollback) cuando un paso falla. Es el paso final que conecta los 3 servicios participantes (Customer, Fleet, Payment — ciclos #18-#20) en un flujo end-to-end funcional.
+
+### Cambios implementados
+
+| Capa | Ficheros | Descripcion |
+|------|----------|-------------|
+| Domain | `SagaStatus` | Enum con 5 estados (STARTED, PROCESSING, COMPENSATING, SUCCEEDED, FAILED) y `canTransitionTo()` via switch expression. |
+| Domain | `SagaState` | Objeto de dominio puro Java. Factory methods `create()` y `reconstruct()`. Metodos de transicion: `beginProcessing`, `advanceToNextStep`, `markAsSucceeded`, `startCompensation`, `decrementStep`, `markAsFailed`. Version nullable para compatibilidad con JPA new-entity detection. |
+| Domain | `SagaStateRepository` | Puerto de salida: `save(SagaState)`, `findById(UUID)`. |
+| Domain | 30 unit tests | `SagaStatusTest` (11 tests) + `SagaStateTest` (19 tests, nested classes por operacion). |
+| Application | `SagaStep<T>` | Interfaz generica: `process(T)`, `rollback(T)`, `getName()`, `hasCompensation()`. |
+| Application | `ReservationSagaData` | Record con los 7 campos necesarios para todos los pasos SAGA. |
+| Application | `SagaCommandPublisher` | Puerto de salida: `publish(exchange, routingKey, payload)`. |
+| Application | `CustomerValidationStep` | Paso 0: envia a `customer.exchange`/`customer.validate.command`. Sin compensacion. |
+| Application | `PaymentStep` | Paso 1: process envia `payment.process.command`, rollback envia `payment.refund.command`. Unico paso con compensacion. |
+| Application | `FleetConfirmationStep` | Paso 2: envia a `fleet.exchange`/`fleet.confirm.command`. Sin compensacion. |
+| Application | `ReservationSagaOrchestrator` | Clase central con 4 metodos `@Transactional`: `start()`, `handleStepSuccess()`, `handleStepFailure()`, `handleCompensationComplete()`. Logica de compensacion inversa via `findNextCompensatableStep()`. |
+| Application | 20 unit tests | `SagaStepsTest` (12 tests) + `ReservationSagaOrchestratorTest` (8 tests, Mockito con LENIENT strictness). |
+| Infrastructure | `SagaStateJpaEntity` | `@Entity` con `@Version` para optimistic locking. Separada del domain object (patron del proyecto). |
+| Infrastructure | `SagaStateJpaRepository`, `SagaStatePersistenceMapper`, `SagaStateRepositoryAdapter` | Adaptador de persistencia completo. Usa `saveAndFlush()` para version correcta. |
+| Infrastructure | `OutboxSagaCommandPublisher` | Implementa `SagaCommandPublisher` via outbox: escribe `OutboxEvent` con aggregateType "SAGA". |
+| Infrastructure | `RabbitMQConfig` | +3 TopicExchanges participantes, +7 response queues con DLQ routing, +7 bindings. |
+| Infrastructure | 7 Response Listeners | `CustomerValidated/RejectedResponseListener`, `PaymentCompleted/Failed/RefundedResponseListener`, `FleetConfirmed/RejectedResponseListener`. Cada uno parsea `Message.getBody()` via ObjectMapper y delega al orchestrator. |
+| Container | `V3__create_saga_state_table.sql` | Tabla `saga_state` con PK `saga_id`, `@Version`, indice en status. |
+| Container | `BeanConfiguration` | +5 beans nuevos (mapper, 3 steps, orchestrator). Updated `reservationApplicationService` con 4to parametro. |
+| Container | `ReservationApplicationService` | Tras persist + event publishing, construye `ReservationSagaData` y llama `sagaOrchestrator.start()`. |
+| Container | 5 ITs | `SagaStateRepositoryAdapterIT`, `ReservationSagaHappyPathIT`, `ReservationSagaCustomerRejectionIT`, `ReservationSagaPaymentFailureIT`, `ReservationSagaFleetRejectionIT`. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Unit tests reservation-service | 110 | 160 (+30 domain, +20 application) |
+| ITs reservation-service | 15 | 20 (+5 SAGA ITs) |
+| Total tests | 125 | 180 |
+| `@RabbitListener` reservation-service | 0 | 7 (response listeners) |
+| `@RabbitListener` plataforma | 5 (1 Customer + 2 Fleet + 2 Payment) | 12 (+7 Reservation) |
+| RabbitMQ queues Reservation | 2 (created + DLQ) | 9 (+7 response queues) |
+| SagaStep implementations | 0 | 3 (Customer, Payment, Fleet) |
+| Tablas reservation-service | 3 (reservations, reservation_items, outbox_events) | 4 (+saga_state) |
+
+### Problemas encontrados y resueltos
+
+#### 1. JPA new-entity detection con @Version y ID asignado manualmente
+
+`SagaState.create()` inicializaba version a `0L`. Pero JPA usa `@Version == null` para detectar entidades nuevas (persist) vs existentes (merge). Con version `0L`, JPA llamaba merge sobre una fila inexistente → `ObjectOptimisticLockingFailureException`.
+
+**Fix**: Cambiar `SagaState.create()` para inicializar version a `null`. JPA entonces llama persist (correcto para INSERT), y tras el persist la version queda en 0. En el siguiente save, version 0 → merge correcto → version 1.
+
+**Moraleja**: Con IDs asignados manualmente (UUID sin `@GeneratedValue`), JPA necesita `@Version == null` para distinguir INSERT de UPDATE. Esto aplica a cualquier entidad con PK manual y optimistic locking.
+
+#### 2. saveAndFlush necesario para version visible inmediatamente
+
+`SagaStateRepositoryAdapter.save()` usaba `jpaRepository.save()` que no fuerza flush. La version incrementada por `@Version` solo se refleja tras el flush SQL. El IT que verificaba version=1 despues del segundo save veia version=0.
+
+**Fix**: Cambiar a `jpaRepository.saveAndFlush()`. El SQL UPDATE se ejecuta inmediatamente, actualizando el campo `@Version` en el objeto JPA.
+
+**Moraleja**: Cuando se necesita leer el `@Version` actualizado inmediatamente despues de save (no al final del transaction), usar `saveAndFlush()`.
+
+#### 3. Jackson2JsonMessageConverter double-serializa Strings en tests
+
+El modulo `common-messaging` registra un `Jackson2JsonMessageConverter` como bean global. Cuando los ITs usaban `rabbitTemplate.convertAndSend(exchange, key, jsonString)`, Jackson serializaba el String como JSON string (envuelto en comillas). El listener recibia un `TextNode` en vez de un `ObjectNode`, y `json.get("reservationId")` retornaba null.
+
+**Fix**: Cambiar los ITs para enviar `Map.of(...)` en vez de JSON strings. El `Jackson2JsonMessageConverter` serializa el Map como un JSON object correctamente. Alternativa: usar `rabbitTemplate.send()` con `MessageBuilder` (como hicimos en ciclo #20).
+
+**Moraleja**: Con `Jackson2JsonMessageConverter` activo, nunca enviar JSON pre-serializado via `convertAndSend()`. Enviar objetos Java (Map, POJO) y dejar que el converter los serialice, o usar `send()` con raw bytes.
+
+#### 4. Constructor de ReservationApplicationService cambio de 3 a 4 parametros
+
+Al agregar `ReservationSagaOrchestrator` como 4ta dependencia, los tests existentes (`CreateTest`, `TrackTest`) dejaron de compilar.
+
+**Fix**: Agregar `@Mock ReservationSagaOrchestrator sagaOrchestrator` en cada test y pasarlo como 4to argumento al constructor.
+
+**Moraleja**: Todo cambio de constructor en un application service impacta sus tests. Revisar tests existentes inmediatamente despues de modificar la firma.
+
+### Lecciones aprendidas
+
+- **SAGA Orchestrator es el change mas complejo pero el patron es predecible**: 43 tasks suenan intimidante, pero el patron hexagonal descompone el problema en capas independientes. Domain primero (puro Java), luego application (logica de coordinacion), infrastructure (adaptadores), container (wiring + tests).
+- **La compensacion inversa es elegante**: `findNextCompensatableStep(fromIndex)` camina hacia atras buscando pasos con `hasCompensation=true`. Solo PaymentStep tiene compensacion, asi que fleet rejection → payment refund → cancel. Customer rejection → cancel directo (sin compensacion). El codigo es generico y funciona para N pasos.
+- **Los tests de SAGA son mas valiosos que los unitarios individuales**: Los 5 ITs cubren happy path, customer rejection, payment failure, fleet rejection (con compensacion), y persistencia de SagaState. Cada IT simula el flujo completo POST → mensajes → verificacion de estado final con Awaitility.
+- **Jackson2JsonMessageConverter es una trampa recurrente**: Tercer ciclo donde el message converter causa problemas en tests (ver ciclo #20). La regla es clara: con Jackson converter, enviar objetos Java via `convertAndSend()` o raw bytes via `send()`. Nunca strings JSON pre-serializados.
+- **`@Version null` para entidades nuevas con ID manual**: Leccion critica para JPA. Sin `@GeneratedValue`, la unica senyal de "nueva entidad" es `@Version == null`. Esto deberia documentarse como patron del proyecto para futuras entidades con PK asignado.
+- **El flujo SAGA end-to-end funciona**: Reservation crea la saga → publica comando de validacion de customer via outbox → Customer responde con evento → listener delega al orchestrator → orquestador avanza al siguiente paso → y asi hasta confirmacion o compensacion. Los 3 servicios participantes y el orquestador estan conectados.
+
+### Siguiente paso
+
+El SAGA Orchestrator esta completo. Los posibles siguientes pasos son:
+- **End-to-end testing** con los 4 servicios corriendo simultaneamente via Docker Compose
+- **SAGA timeout/retry handling** — que pasa si un participante no responde?
+- **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
+- **Monitoring/observability** — tracing distribuido para seguir una saga a traves de los servicios
