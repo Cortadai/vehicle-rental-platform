@@ -92,7 +92,7 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] MDC/correlationId propagation (tracing distribuido)
 - [ ] End-to-end testing con Docker Compose (4 servicios simultaneos)
 - [ ] Mover spring-boot-starter-test a dependencyManagement (domain zero-Spring)
-- [ ] ArchUnit tests para boundaries hexagonales
+- [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
 - [ ] Indices en BD (status, email, category)
 - [ ] OpenAPI documentation
 - [ ] README para developers
