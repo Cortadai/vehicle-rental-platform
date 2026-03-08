@@ -2352,3 +2352,60 @@ Los tests iniciales para `execute(ReleaseFleetReservationCommand)` stubbeaban `v
 ### Siguiente paso
 
 **Reservation Outbox + Messaging refinement** o **SAGA Orchestrator** — el reservation-service ya tiene outbox, pero podria necesitar ajustes para los nuevos command/response queues de Fleet. El paso mas ambicioso seria empezar el orquestador SAGA en reservation-service.
+
+---
+
+## Ciclo #20: payment-saga-participation (2026-03-08)
+
+### Que se hizo
+
+Habilitar Payment Service para recibir comandos SAGA via RabbitMQ. A diferencia de Customer (#18) y Fleet (#19) que necesitaron toda la infraestructura de outbox desde cero, Payment ya tenia todo implementado desde el change #16. Este change solo agrega la **recepcion de comandos**: 2 listeners que delegan a los use cases existentes (`ProcessPaymentUseCase` y `RefundPaymentUseCase`).
+
+### Cambios implementados
+
+| Capa | Ficheros | Descripcion |
+|------|----------|-------------|
+| Infrastructure | `RabbitMQConfig` | +2 command queues (`payment.process.command.queue`, `payment.refund.command.queue`) con DLQ routing, +2 bindings a payment.exchange, +2 DLQ bindings. Total bindings: 10 (antes 6). |
+| Infrastructure | `PaymentProcessListener` | `@RabbitListener` en `payment.process.command.queue`. Parsea JSON (reservationId, customerId, amount, currency), construye `ProcessPaymentCommand`, invoca use case. |
+| Infrastructure | `PaymentRefundListener` | `@RabbitListener` en `payment.refund.command.queue`. Parsea JSON (reservationId), construye `RefundPaymentCommand`, invoca use case. |
+| Container | `PaymentProcessListenerIT` | Envia raw Message al exchange, verifica Payment creado con status COMPLETED y outbox event publicado. |
+| Container | `PaymentRefundListenerIT` | Crea Payment via use case, envia refund command, verifica transicion a REFUNDED y outbox event. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| `@RabbitListener` Payment | 0 | 2 |
+| `@RabbitListener` plataforma | 3 (1 Customer + 2 Fleet) | 5 (+2 Payment) |
+| RabbitMQ bindings Payment | 6 (3 event + 3 DLQ) | 10 (+2 command + 2 command DLQ) |
+| ITs Payment | 16 | 18 (+2 listener ITs) |
+| Servicios participantes SAGA listos | 2 (Customer, Fleet) | 3 (Customer, Fleet, Payment) |
+
+### Problemas encontrados y resueltos
+
+#### 1. convertAndSend con String produce JSON envuelto
+
+Al usar `rabbitTemplate.convertAndSend(exchange, routingKey, jsonString)` en los ITs, el message converter (Jackson o SimpleMessageConverter) envuelve el String de forma que `objectMapper.readTree(message.getBody())` no encuentra los campos esperados. `json.get("reservationId")` retorna null y el listener falla con NullPointerException.
+
+**Fix**: Usar `rabbitTemplate.send()` con un `Message` construido manualmente via `MessageBuilder.withBody(payload.getBytes(UTF_8)).setContentType("application/json").build()`. Esto es consistente con como el `OutboxPublisher` envia mensajes en produccion.
+
+**Moraleja**: En tests de listeners, siempre enviar mensajes como raw bytes con `rabbitTemplate.send()`, no como objetos con `convertAndSend()`. El message converter del test puede diferir del que se usa en produccion.
+
+#### 2. aggregate_id en outbox_events es paymentId, no reservationId
+
+El `OutboxPaymentDomainEventPublisher.extractAggregateId()` usa `e.paymentId().value().toString()` como aggregate_id. Los ITs inicialmente buscaban outbox events por `aggregate_id = reservationId`, que siempre daba 0 resultados.
+
+**Fix**: Primero obtener el `paymentId` del registro en `payments` table via `SELECT id FROM payments WHERE reservation_id = ?::uuid`, luego usarlo para la query de outbox.
+
+**Moraleja**: Verificar que campo usa el outbox publisher como aggregate_id antes de escribir assertions. No asumir que es el campo de correlacion SAGA.
+
+### Lecciones aprendidas
+
+- **Payment fue el change mas reducido de los 3 participantes**: Solo 12 tasks vs 30+ en Customer y Fleet. La diferencia es que Payment ya tenia toda la infraestructura de outbox y messaging. Solo faltaba la recepcion de comandos.
+- **Reusar use cases existentes elimina complejidad**: A diferencia de Customer (que necesito `ValidateCustomerForReservationUseCase`) y Fleet (que necesito `ConfirmFleetAvailabilityUseCase` + `ReleaseFleetReservationUseCase`), Payment ya tenia los comandos correctos desde el change #14. `ProcessPaymentCommand(reservationId, customerId, amount, currency)` ya llevaba correlacion SAGA.
+- **Patron de listeners ya es 100% mecanico**: Tercer servicio con el mismo patron exacto — `@Component`, `@RabbitListener(queues = "...")`, `Message` param, `objectMapper.readTree()`, construct command, invoke use case. Zero variacion entre servicios.
+- **Los 3 servicios participantes estan listos para SAGA**: Customer, Fleet y Payment pueden recibir comandos y responder con eventos via outbox. El siguiente paso es el orquestador en Reservation Service.
+
+### Siguiente paso
+
+**SAGA Orchestrator** en reservation-service — el unico paso que queda antes de tener el flujo completo de reserva funcionando end-to-end.
