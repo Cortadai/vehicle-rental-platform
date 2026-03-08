@@ -304,7 +304,7 @@ The root POM SHALL centralize all non-Spring-Boot-managed dependency versions in
 - **THEN** the version SHALL be centralized in the parent POM properties
 
 ### Requirement: Plugin configuration centralized in pluginManagement
-The root POM SHALL configure Surefire, Failsafe, maven-compiler-plugin (with Lombok + MapStruct annotation processors), and spring-boot-maven-plugin in `<pluginManagement>`.
+The root POM SHALL configure Surefire, Failsafe, maven-compiler-plugin (with Lombok + MapStruct annotation processors), spring-boot-maven-plugin, and JaCoCo (with prepare-agent, report, prepare-agent-integration, report-integration, merge-results, and check executions) in `<pluginManagement>`.
 
 #### Scenario: Surefire runs only unit tests
 - **WHEN** `mvn test` is executed
@@ -313,4 +313,8 @@ The root POM SHALL configure Surefire, Failsafe, maven-compiler-plugin (with Lom
 #### Scenario: Failsafe runs only integration tests
 - **WHEN** `mvn verify` is executed
 - **THEN** Failsafe SHALL include `**/*IT.java`
+
+#### Scenario: JaCoCo configured in pluginManagement
+- **WHEN** the root POM `<pluginManagement>` is inspected
+- **THEN** it SHALL contain a `jacoco-maven-plugin` configuration with six executions: `prepare-agent`, `report`, `prepare-agent-integration`, `report-integration`, `merge-results`, and `check`
 
