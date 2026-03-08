@@ -6,6 +6,7 @@ import com.vehiclerental.reservation.application.dto.response.TrackReservationRe
 import com.vehiclerental.reservation.application.exception.ReservationNotFoundException;
 import com.vehiclerental.reservation.application.mapper.ReservationApplicationMapper;
 import com.vehiclerental.reservation.application.port.output.ReservationDomainEventPublisher;
+import com.vehiclerental.reservation.application.saga.ReservationSagaOrchestrator;
 import com.vehiclerental.reservation.domain.model.aggregate.Reservation;
 import com.vehiclerental.reservation.domain.model.entity.ReservationItem;
 import com.vehiclerental.reservation.domain.model.vo.CustomerId;
@@ -45,6 +46,9 @@ class ReservationApplicationServiceTrackTest {
     @Mock
     private ReservationDomainEventPublisher eventPublisher;
 
+    @Mock
+    private ReservationSagaOrchestrator sagaOrchestrator;
+
     private final ReservationApplicationMapper mapper = new ReservationApplicationMapper();
 
     private ReservationApplicationService service;
@@ -57,7 +61,7 @@ class ReservationApplicationServiceTrackTest {
 
     @BeforeEach
     void setUp() {
-        service = new ReservationApplicationService(reservationRepository, eventPublisher, mapper);
+        service = new ReservationApplicationService(reservationRepository, eventPublisher, mapper, sagaOrchestrator);
     }
 
     @Nested

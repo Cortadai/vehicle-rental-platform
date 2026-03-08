@@ -6,6 +6,7 @@ import com.vehiclerental.reservation.application.dto.command.CreateReservationCo
 import com.vehiclerental.reservation.application.dto.response.CreateReservationResponse;
 import com.vehiclerental.reservation.application.mapper.ReservationApplicationMapper;
 import com.vehiclerental.reservation.application.port.output.ReservationDomainEventPublisher;
+import com.vehiclerental.reservation.application.saga.ReservationSagaOrchestrator;
 import com.vehiclerental.reservation.domain.model.aggregate.Reservation;
 import com.vehiclerental.reservation.domain.port.output.ReservationRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,9 @@ class ReservationApplicationServiceCreateTest {
     @Mock
     private ReservationDomainEventPublisher eventPublisher;
 
+    @Mock
+    private ReservationSagaOrchestrator sagaOrchestrator;
+
     private final ReservationApplicationMapper mapper = new ReservationApplicationMapper();
 
     private ReservationApplicationService service;
@@ -47,7 +51,7 @@ class ReservationApplicationServiceCreateTest {
 
     @BeforeEach
     void setUp() {
-        service = new ReservationApplicationService(reservationRepository, eventPublisher, mapper);
+        service = new ReservationApplicationService(reservationRepository, eventPublisher, mapper, sagaOrchestrator);
     }
 
     @Nested

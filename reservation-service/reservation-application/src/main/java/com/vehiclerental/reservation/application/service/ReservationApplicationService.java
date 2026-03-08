@@ -10,6 +10,8 @@ import com.vehiclerental.reservation.application.mapper.ReservationApplicationMa
 import com.vehiclerental.reservation.application.port.input.CreateReservationUseCase;
 import com.vehiclerental.reservation.application.port.input.TrackReservationUseCase;
 import com.vehiclerental.reservation.application.port.output.ReservationDomainEventPublisher;
+import com.vehiclerental.reservation.application.saga.ReservationSagaData;
+import com.vehiclerental.reservation.application.saga.ReservationSagaOrchestrator;
 import com.vehiclerental.reservation.domain.model.aggregate.Reservation;
 import com.vehiclerental.reservation.domain.model.entity.ReservationItem;
 import com.vehiclerental.reservation.domain.model.vo.CustomerId;
@@ -30,13 +32,16 @@ public class ReservationApplicationService implements CreateReservationUseCase, 
     private final ReservationRepository reservationRepository;
     private final ReservationDomainEventPublisher eventPublisher;
     private final ReservationApplicationMapper mapper;
+    private final ReservationSagaOrchestrator sagaOrchestrator;
 
     public ReservationApplicationService(ReservationRepository reservationRepository,
                                          ReservationDomainEventPublisher eventPublisher,
-                                         ReservationApplicationMapper mapper) {
+                                         ReservationApplicationMapper mapper,
+                                         ReservationSagaOrchestrator sagaOrchestrator) {
         this.reservationRepository = reservationRepository;
         this.eventPublisher = eventPublisher;
         this.mapper = mapper;
+        this.sagaOrchestrator = sagaOrchestrator;
     }
 
     @Override
@@ -60,6 +65,18 @@ public class ReservationApplicationService implements CreateReservationUseCase, 
         Reservation savedReservation = reservationRepository.save(reservation);
         eventPublisher.publish(reservation.getDomainEvents());
         reservation.clearDomainEvents();
+
+        ReservationItem firstItem = savedReservation.getItems().get(0);
+        ReservationSagaData sagaData = new ReservationSagaData(
+                savedReservation.getId().value(),
+                savedReservation.getCustomerId().value(),
+                firstItem.getVehicleId().value(),
+                savedReservation.getTotalPrice().amount(),
+                savedReservation.getTotalPrice().currency().getCurrencyCode(),
+                savedReservation.getDateRange().pickupDate(),
+                savedReservation.getDateRange().returnDate()
+        );
+        sagaOrchestrator.start(sagaData);
 
         return mapper.toCreateResponse(savedReservation);
     }
