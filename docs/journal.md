@@ -2507,3 +2507,71 @@ El SAGA Orchestrator esta completo. Los posibles siguientes pasos son:
 - **SAGA timeout/retry handling** — que pasa si un participante no responde?
 - **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
 - **Monitoring/observability** — tracing distribuido para seguir una saga a traves de los servicios
+
+---
+
+## Ciclo #22: jacoco-permanent-coverage (2026-03-08)
+
+### Que se hizo
+
+Configurar JaCoCo como red de seguridad permanente en el build. Antes, JaCoCo solo se activaba con `-Pcoverage` y no tenia goal `check` — la cobertura se podia consultar pero nunca rompia el build. Ahora esta siempre activo con umbrales diferenciados por capa arquitectonica: domain/common al 80%, application al 75%, infrastructure al 60%. Los modulos container estan excluidos y las entidades JPA (data holders sin logica) no cuentan para el calculo.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `pom.xml` (parent) | JaCoCo movido de profile `coverage` a `<plugins>` activos. 6 executions en pluginManagement: `prepare-agent`, `report`, `prepare-agent-integration`, `report-integration`, `merge-results` (combina jacoco.exec + jacoco-it.exec), `check` (INSTRUCTION/COVEREDRATIO, minimum 0.80). Property `<jacoco.skip>false</jacoco.skip>`. Exclusiones globales: `**/entity/*JpaEntity.class`, `**/outbox/OutboxEvent.class`. Profile `coverage` eliminado. |
+| 4x `*-container/pom.xml` | `<jacoco.skip>true</jacoco.skip>` en `<properties>`. |
+| 4x `*-application/pom.xml` | Override del check execution con minimum `0.75`. |
+| 4x `*-infrastructure/pom.xml` | Override del check execution con minimum `0.60`. |
+| `CLAUDE.md` | Seccion Build & Run actualizada: JaCoCo siempre activo, sin `-Pcoverage`. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| JaCoCo activacion | Solo con `-Pcoverage` | Siempre activo |
+| Goal `check` | No existia | 14 modulos con check |
+| Umbral domain/common | Sin umbral | 80% INSTRUCTION |
+| Umbral application | Sin umbral | 75% INSTRUCTION |
+| Umbral infrastructure | Sin umbral | 60% INSTRUCTION |
+| Modulos excluidos | Ninguno | 4 containers (jacoco.skip) |
+| Clases excluidas | Ninguna | 6 *JpaEntity + OutboxEvent |
+| POMs modificados | 0 | 13 (1 parent + 4 container + 4 application + 4 infrastructure) |
+| `mvn verify` resultado | BUILD SUCCESS (492 tests) | BUILD SUCCESS (492 tests + coverage check) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Contador INSTRUCTION explicito
+
+JaCoCo usa INSTRUCTION por defecto, pero dejarlo implicito es fragil ante cambios de version. Se especifica `<counter>INSTRUCTION</counter>` y `<value>COVEREDRATIO</value>` explicitamente en el XML para que la configuracion sea auto-documentada.
+
+#### 2. Merge de datos unit + IT antes del check
+
+Los modulos infrastructure no tienen tests unitarios — sus tests son ITs en el modulo container. Para que el check no falle con 0% en infrastructure (donde no existe `jacoco.exec`), se usa el goal `merge` que combina `jacoco.exec` + `jacoco-it.exec` en `jacoco-merged.exec`. El check corre sobre el merged. En modulos sin ITs (como domain), el merge simplemente usa el `jacoco.exec` disponible.
+
+**Nota**: En la practica, los modulos infrastructure no tienen tests propios (ni unit ni IT) — los ITs viven en los container modules. El check de 60% es efectivamente un no-op hoy, pero se activara si se agregan tests directamente en infrastructure.
+
+#### 3. Umbrales diferenciados via override en child POMs
+
+JaCoCo no soporta umbrales condicionales por artifactId en `pluginManagement`. El parent define 80% como default. Los modulos application (75%) e infrastructure (60%) sobreescriben la configuracion del check en sus propios POMs. Los modulos domain y common heredan el default sin tocar nada.
+
+#### 4. Exclusion de containers via property vs plugin block
+
+Se evaluo `<skip>true</skip>` en bloque `<plugin>` vs property `jacoco.skip`. La property es una sola linea en `<properties>` — mas concisa que un bloque XML completo del plugin.
+
+### Lecciones aprendidas
+
+- **JaCoCo como quality gate permanente es el paso natural despues de estabilizar los tests**: Con 492 tests pasando, el riesgo ya no es "no tenemos tests" sino "alguien agrega codigo sin tests y la cobertura baja silenciosamente". El check automatico previene esa regresion.
+- **Los umbrales diferenciados reflejan la realidad del proyecto**: Domain es logica pura (80% es facil), application tiene ceremony de mocking (75% es razonable), infrastructure tiene adapters triviales y tests costosos con Testcontainers (60% evita tests de bajo valor).
+- **El merge de exec files resuelve el problema unit vs IT**: Sin merge, los modulos que solo tienen ITs fallarian el check unitario con 0%. El merge es transparente — si solo existe un archivo, lo usa.
+- **Los mappers manuales deben estar cubiertos**: Inicialmente se penso excluirlos como "generados por MapStruct", pero son clases manuales con logica real de conversion (typed IDs, enums, listas). Incluirlos en cobertura tiene valor.
+- **Este es el primer change puramente de build/tooling**: 13 POMs modificados, 0 ficheros Java. Todo es configuracion Maven. El workflow OpenSpec (proposal → design → specs → tasks) funciona igual de bien para changes de build que para features de codigo.
+
+### Siguiente paso
+
+Con JaCoCo como red de seguridad, los posibles siguientes pasos son:
+- **End-to-end testing** con los 4 servicios via Docker Compose
+- **SAGA timeout/retry handling** — que pasa si un participante no responde?
+- **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
+- **Monitoring/observability** — MDC + tracing distribuido
