@@ -45,7 +45,16 @@
 - [x] V2__create_outbox_events_table.sql
 - [x] fleet.release.command.queue en definitions.json (5to command queue)
 
-## Change 4: reservation-saga-orchestration [PENDIENTE]
+## Change 4: payment-saga-participation [COMPLETADO]
+
+- [x] RabbitMQConfig: 2 command queues (process + refund) con DLQ routing
+- [x] RabbitMQConfig: 2 bindings a payment.exchange + 2 DLQ bindings a dlx.exchange
+- [x] PaymentProcessListener (@RabbitListener — reusa ProcessPaymentUseCase existente)
+- [x] PaymentRefundListener (@RabbitListener — reusa RefundPaymentUseCase existente)
+- [x] PaymentProcessListenerIT + PaymentRefundListenerIT (raw Message + Awaitility)
+- [x] Todos los tests pasan (69 unit + 18 ITs)
+
+## Change 5: reservation-saga-orchestration [PENDIENTE]
 
 - [ ] SagaOrchestrator + SagaState + SagaStep interface
 - [ ] Response listeners en Reservation

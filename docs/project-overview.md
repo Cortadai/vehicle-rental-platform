@@ -96,11 +96,12 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 
   #17 pre-saga-alignment               }  Alignment
   #18 customer-outbox-and-messaging    }  Conectar al bus
-  #19 fleet-outbox-and-messaging       }  Conectar al bus  <-- ESTAMOS AQUI
+  #19 fleet-outbox-and-messaging       }  Conectar al bus
+  #20 payment-saga-participation       }  Conectar al bus  <-- ESTAMOS AQUI
 
   --- Proximos pasos -------------------------------------------------
 
-  #20 reservation-saga-orchestration   }  SAGA         <-- OBJETIVO
+  #21 reservation-saga-orchestration   }  SAGA         <-- OBJETIVO
 ```
 
 ## Mapa de Modulos (19)
