@@ -48,6 +48,8 @@
         <module>payment-service/payment-application</module>
         <module>payment-service/payment-infrastructure</module>
         <module>payment-service/payment-container</module>
+        <!-- Architecture Tests -->
+        <module>architecture-tests</module>
     </modules>
 
     <!-- ==================== PROPERTIES ==================== -->

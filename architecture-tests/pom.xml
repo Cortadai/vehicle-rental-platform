@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.vehiclerental</groupId>
+        <artifactId>vehicle-rental-platform</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>architecture-tests</artifactId>
+    <packaging>jar</packaging>
+
+    <name>Architecture Tests</name>
+    <description>ArchUnit tests enforcing hexagonal architecture boundaries across all services.</description>
+
+    <properties>
+        <jacoco.skip>true</jacoco.skip>
+    </properties>
+
+    <dependencies>
+        <!-- Internal modules: 4x infrastructure (transitively brings application + domain) -->
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>customer-infrastructure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>fleet-infrastructure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>reservation-infrastructure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>payment-infrastructure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.vehiclerental</groupId>
+            <artifactId>common-messaging</artifactId>
+        </dependency>
+
+        <!-- ArchUnit -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+</project>
