@@ -4,7 +4,7 @@ payment-rabbitmq-topology
 Purpose
 -------
 
-RabbitMQ topology declaration for Payment Service. Declares the payment exchange, 3 event queues (completed, failed, refunded), a shared DLQ, and all bindings as Spring beans. Also updates `definitions.json` with the missing `payment.refunded.queue` topology.
+RabbitMQ topology declaration for Payment Service. Declares the payment exchange, 3 event queues (completed, failed, refunded), 2 command queues (process, refund), a shared DLQ, and all bindings as Spring beans. Also updates `definitions.json` with the missing `payment.refunded.queue` topology.
 
 ## ADDED Requirements
 
@@ -58,9 +58,29 @@ RabbitMQConfig SHALL declare one queue per payment event type, each with dead-le
 - **THEN** a `Queue` bean named `"payment.dlq"` SHALL be available
 - **AND** it SHALL be durable
 
+### Requirement: RabbitMQConfig declares 2 command queues with DLQ routing
+
+RabbitMQConfig SHALL declare one queue per SAGA command type, each with dead-letter routing to the DLX exchange, following the same pattern as the existing event queues.
+
+#### Scenario: payment.process.command.queue is durable with DLQ
+
+- **WHEN** the application context is loaded
+- **THEN** a `Queue` bean named `"payment.process.command.queue"` SHALL be available
+- **AND** it SHALL be durable
+- **AND** it SHALL have `x-dead-letter-exchange` set to `"dlx.exchange"`
+- **AND** it SHALL have `x-dead-letter-routing-key` set to `"payment.process.command.dlq"`
+
+#### Scenario: payment.refund.command.queue is durable with DLQ
+
+- **WHEN** the application context is loaded
+- **THEN** a `Queue` bean named `"payment.refund.command.queue"` SHALL be available
+- **AND** it SHALL be durable
+- **AND** it SHALL have `x-dead-letter-exchange` set to `"dlx.exchange"`
+- **AND** it SHALL have `x-dead-letter-routing-key` set to `"payment.refund.command.dlq"`
+
 ### Requirement: RabbitMQConfig declares bindings
 
-RabbitMQConfig SHALL bind each event queue to the payment exchange with the appropriate routing key, and bind the DLQ to the DLX exchange.
+RabbitMQConfig SHALL bind each event queue and each command queue to the payment exchange with the appropriate routing key, and bind the DLQ to the DLX exchange. The total binding count is 10 (3 event + 2 command + 3 event DLQ + 2 command DLQ).
 
 #### Scenario: Completed queue binding
 
@@ -77,6 +97,16 @@ RabbitMQConfig SHALL bind each event queue to the payment exchange with the appr
 - **WHEN** the application context is loaded
 - **THEN** `payment.refunded.queue` SHALL be bound to `payment.exchange` with routing key `"payment.refunded"`
 
+#### Scenario: Process command queue binding
+
+- **WHEN** the application context is loaded
+- **THEN** `payment.process.command.queue` SHALL be bound to `payment.exchange` with routing key `"payment.process.command"`
+
+#### Scenario: Refund command queue binding
+
+- **WHEN** the application context is loaded
+- **THEN** `payment.refund.command.queue` SHALL be bound to `payment.exchange` with routing key `"payment.refund.command"`
+
 #### Scenario: DLQ bindings for completed
 
 - **WHEN** the application context is loaded
@@ -91,6 +121,16 @@ RabbitMQConfig SHALL bind each event queue to the payment exchange with the appr
 
 - **WHEN** the application context is loaded
 - **THEN** `payment.dlq` SHALL be bound to `dlx.exchange` with routing key `"payment.refunded.dlq"`
+
+#### Scenario: DLQ bindings for process command
+
+- **WHEN** the application context is loaded
+- **THEN** `payment.dlq` SHALL be bound to `dlx.exchange` with routing key `"payment.process.command.dlq"`
+
+#### Scenario: DLQ bindings for refund command
+
+- **WHEN** the application context is loaded
+- **THEN** `payment.dlq` SHALL be bound to `dlx.exchange` with routing key `"payment.refund.command.dlq"`
 
 ### Requirement: definitions.json includes payment.refunded topology
 
