@@ -12,7 +12,7 @@ A `docker-compose.yml` at the project root SHALL define a PostgreSQL 16 containe
 
 #### Scenario: PostgreSQL container configuration
 
-- **WHEN** `docker compose --profile infra up -d` is executed
+- **WHEN** `docker compose up -d` is executed
 - **THEN** a container named `vehicle-rental-postgres` SHALL start with PostgreSQL 16, exposed on port `5432`, with a named volume for data persistence and a health check using `pg_isready`
 
 #### Scenario: Four schemas created on init
@@ -31,7 +31,7 @@ The `docker-compose.yml` SHALL define a RabbitMQ 3.13 container with the managem
 
 #### Scenario: RabbitMQ container configuration
 
-- **WHEN** `docker compose --profile infra up -d` is executed
+- **WHEN** `docker compose up -d` is executed
 - **THEN** a container named `vehicle-rental-rabbitmq` SHALL start with RabbitMQ 3.13 management image, exposed on ports `5672` (AMQP) and `15672` (Management UI), with a health check using `rabbitmq-diagnostics -q ping`
 
 #### Scenario: Management UI accessible
@@ -44,19 +44,19 @@ The `docker-compose.yml` SHALL define a RabbitMQ 3.13 container with the managem
 - **WHEN** the RabbitMQ container starts
 - **THEN** `docker/rabbitmq/definitions.json` SHALL be mounted and loaded via `docker/rabbitmq/rabbitmq.conf`, creating all exchanges, queues, and bindings
 
-### Requirement: Docker Compose uses profile for infrastructure
+### Requirement: Docker Compose starts infrastructure without profiles
 
-Infrastructure containers SHALL be gated behind a Docker Compose profile to prevent accidental startup.
+Infrastructure containers SHALL NOT use Docker Compose profiles — they start with a plain `docker compose up -d` alongside the microservices.
 
-#### Scenario: Profile name
+#### Scenario: No profile required
 
-- **WHEN** `docker compose up -d` is executed without `--profile`
-- **THEN** no infrastructure containers SHALL start
-
-#### Scenario: Profile activation
-
-- **WHEN** `docker compose --profile infra up -d` is executed
+- **WHEN** `docker compose up -d` is executed without any flags
 - **THEN** both PostgreSQL and RabbitMQ containers SHALL start
+
+#### Scenario: Infrastructure-only startup
+
+- **WHEN** a developer wants only infrastructure without microservices
+- **THEN** they SHALL run `docker compose up postgres rabbitmq -d`
 
 ### Requirement: Init scripts for PostgreSQL schema setup
 
