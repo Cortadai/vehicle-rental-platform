@@ -49,6 +49,22 @@ public class RabbitMQConfig {
     }
 
     @Bean
+    public Queue paymentProcessCommandQueue() {
+        return QueueBuilder.durable("payment.process.command.queue")
+                .withArgument("x-dead-letter-exchange", "dlx.exchange")
+                .withArgument("x-dead-letter-routing-key", "payment.process.command.dlq")
+                .build();
+    }
+
+    @Bean
+    public Queue paymentRefundCommandQueue() {
+        return QueueBuilder.durable("payment.refund.command.queue")
+                .withArgument("x-dead-letter-exchange", "dlx.exchange")
+                .withArgument("x-dead-letter-routing-key", "payment.refund.command.dlq")
+                .build();
+    }
+
+    @Bean
     public Queue paymentDlq() {
         return QueueBuilder.durable("payment.dlq").build();
     }
@@ -70,6 +86,18 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(paymentRefundedQueue).to(paymentExchange).with("payment.refunded");
     }
 
+    // --- Bindings: command queues to payment exchange ---
+
+    @Bean
+    public Binding paymentProcessCommandBinding(Queue paymentProcessCommandQueue, TopicExchange paymentExchange) {
+        return BindingBuilder.bind(paymentProcessCommandQueue).to(paymentExchange).with("payment.process.command");
+    }
+
+    @Bean
+    public Binding paymentRefundCommandBinding(Queue paymentRefundCommandQueue, TopicExchange paymentExchange) {
+        return BindingBuilder.bind(paymentRefundCommandQueue).to(paymentExchange).with("payment.refund.command");
+    }
+
     // --- DLQ bindings ---
 
     @Bean
@@ -85,5 +113,15 @@ public class RabbitMQConfig {
     @Bean
     public Binding paymentRefundedDlqBinding(Queue paymentDlq, DirectExchange dlxExchange) {
         return BindingBuilder.bind(paymentDlq).to(dlxExchange).with("payment.refunded.dlq");
+    }
+
+    @Bean
+    public Binding paymentProcessCommandDlqBinding(Queue paymentDlq, DirectExchange dlxExchange) {
+        return BindingBuilder.bind(paymentDlq).to(dlxExchange).with("payment.process.command.dlq");
+    }
+
+    @Bean
+    public Binding paymentRefundCommandDlqBinding(Queue paymentDlq, DirectExchange dlxExchange) {
+        return BindingBuilder.bind(paymentDlq).to(dlxExchange).with("payment.refund.command.dlq");
     }
 }
