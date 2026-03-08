@@ -23,3 +23,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8183}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

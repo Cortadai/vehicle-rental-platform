@@ -1,9 +1,8 @@
 services:
+  # ==================== Infrastructure ====================
   postgres:
     image: postgres:16-alpine
     container_name: vehicle-rental-postgres
-    profiles:
-      - infra
     environment:
       POSTGRES_DB: vehicle_rental_db
       POSTGRES_USER: postgres
@@ -22,8 +21,6 @@ services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: vehicle-rental-rabbitmq
-    profiles:
-      - infra
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -36,6 +33,91 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ==================== Microservices ====================
+  customer-service:
+    image: vehicle-rental/customer-service:latest
+    container_name: vehicle-rental-customer
+    ports:
+      - "8181:8181"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vehicle_rental_db
+      DB_USERNAME: customer_user
+      DB_PASSWORD: customer_pass
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  fleet-service:
+    image: vehicle-rental/fleet-service:latest
+    container_name: vehicle-rental-fleet
+    ports:
+      - "8182:8182"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vehicle_rental_db
+      DB_USERNAME: fleet_user
+      DB_PASSWORD: fleet_pass
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  reservation-service:
+    image: vehicle-rental/reservation-service:latest
+    container_name: vehicle-rental-reservation
+    ports:
+      - "8183:8183"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vehicle_rental_db
+      DB_USERNAME: reservation_user
+      DB_PASSWORD: reservation_pass
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  payment-service:
+    image: vehicle-rental/payment-service:latest
+    container_name: vehicle-rental-payment
+    ports:
+      - "8184:8184"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: vehicle_rental_db
+      DB_USERNAME: payment_user
+      DB_PASSWORD: payment_pass
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   postgres-data:

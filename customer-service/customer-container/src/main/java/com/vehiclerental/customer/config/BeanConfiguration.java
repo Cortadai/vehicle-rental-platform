@@ -1,7 +1,6 @@
 package com.vehiclerental.customer.config;
 
 import com.vehiclerental.customer.application.mapper.CustomerApplicationMapper;
-import com.vehiclerental.customer.application.port.input.*;
 import com.vehiclerental.customer.application.port.output.CustomerDomainEventPublisher;
 import com.vehiclerental.customer.application.service.CustomerApplicationService;
 import com.vehiclerental.customer.domain.port.output.CustomerRepository;
@@ -29,35 +28,5 @@ public class BeanConfiguration {
             CustomerDomainEventPublisher eventPublisher,
             CustomerApplicationMapper mapper) {
         return new CustomerApplicationService(customerRepository, eventPublisher, mapper);
-    }
-
-    @Bean
-    public CreateCustomerUseCase createCustomerUseCase(CustomerApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public GetCustomerUseCase getCustomerUseCase(CustomerApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public SuspendCustomerUseCase suspendCustomerUseCase(CustomerApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public ActivateCustomerUseCase activateCustomerUseCase(CustomerApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public DeleteCustomerUseCase deleteCustomerUseCase(CustomerApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public ValidateCustomerForReservationUseCase validateCustomerForReservationUseCase(CustomerApplicationService service) {
-        return service;
     }
 }

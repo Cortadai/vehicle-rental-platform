@@ -1,9 +1,6 @@
 package com.vehiclerental.payment.config;
 
 import com.vehiclerental.payment.application.mapper.PaymentApplicationMapper;
-import com.vehiclerental.payment.application.port.input.GetPaymentUseCase;
-import com.vehiclerental.payment.application.port.input.ProcessPaymentUseCase;
-import com.vehiclerental.payment.application.port.input.RefundPaymentUseCase;
 import com.vehiclerental.payment.application.port.output.PaymentDomainEventPublisher;
 import com.vehiclerental.payment.application.port.output.PaymentGateway;
 import com.vehiclerental.payment.application.service.PaymentApplicationService;
@@ -26,20 +23,5 @@ public class BeanConfiguration {
             PaymentGateway paymentGateway,
             PaymentApplicationMapper mapper) {
         return new PaymentApplicationService(paymentRepository, eventPublisher, paymentGateway, mapper);
-    }
-
-    @Bean
-    public ProcessPaymentUseCase processPaymentUseCase(PaymentApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public RefundPaymentUseCase refundPaymentUseCase(PaymentApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public GetPaymentUseCase getPaymentUseCase(PaymentApplicationService service) {
-        return service;
     }
 }

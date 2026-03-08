@@ -118,10 +118,16 @@ mvn test
 # Run unit + integration tests (includes JaCoCo coverage check on merged data)
 mvn verify
 
-# Start infrastructure (PostgreSQL + RabbitMQ)
-docker compose --profile infra up -d
+# Build Paketo OCI images for all services
+mvn spring-boot:build-image -DskipTests -pl customer-service/customer-container,fleet-service/fleet-container,reservation-service/reservation-container,payment-service/payment-container
 
-# Run a specific service
+# Start everything (infra + 4 services)
+docker compose up -d
+
+# Start only infrastructure (PostgreSQL + RabbitMQ)
+docker compose up postgres rabbitmq -d
+
+# Run a specific service locally (without Docker)
 cd reservation-service/reservation-container
 mvn spring-boot:run
 ```

@@ -30,3 +30,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8182}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

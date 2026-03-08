@@ -2,8 +2,6 @@ package com.vehiclerental.reservation.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.reservation.application.mapper.ReservationApplicationMapper;
-import com.vehiclerental.reservation.application.port.input.CreateReservationUseCase;
-import com.vehiclerental.reservation.application.port.input.TrackReservationUseCase;
 import com.vehiclerental.reservation.application.port.output.ReservationDomainEventPublisher;
 import com.vehiclerental.reservation.application.port.output.SagaCommandPublisher;
 import com.vehiclerental.reservation.application.saga.CustomerValidationStep;
@@ -78,15 +76,5 @@ public class BeanConfiguration {
             ReservationApplicationMapper mapper,
             ReservationSagaOrchestrator sagaOrchestrator) {
         return new ReservationApplicationService(reservationRepository, eventPublisher, mapper, sagaOrchestrator);
-    }
-
-    @Bean
-    public CreateReservationUseCase createReservationUseCase(ReservationApplicationService service) {
-        return service;
-    }
-
-    @Bean
-    public TrackReservationUseCase trackReservationUseCase(ReservationApplicationService service) {
-        return service;
     }
 }
