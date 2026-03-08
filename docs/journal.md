@@ -2560,6 +2560,46 @@ JaCoCo no soporta umbrales condicionales por artifactId en `pluginManagement`. E
 
 Se evaluo `<skip>true</skip>` en bloque `<plugin>` vs property `jacoco.skip`. La property es una sola linea en `<properties>` — mas concisa que un bloque XML completo del plugin.
 
+## Ciclo #23: archunit-architecture-tests (2026-03-08)
+
+### Que se hizo
+
+Nuevo modulo `architecture-tests` con tests ArchUnit que validan las boundaries de arquitectura hexagonal de forma automatica. Antes, las reglas (domain sin Spring, application sin infrastructure, dependencias inward-only) se cumplian por disciplina manual. Ahora son tests ejecutables que fallan el build si alguien viola una boundary.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `architecture-tests/pom.xml` | Nuevo modulo: parent POM, `jacoco.skip=true`, depende de 4x `*-infrastructure` + `common-messaging` + `archunit-junit5` (test). |
+| `DomainPurityTest.java` | 5 reglas: domain no importa Spring, JPA, application, infrastructure, ni common-messaging. |
+| `ApplicationIsolationTest.java` | 1 regla allowlist: application solo depende de domain, common, java, lombok, slf4j, jackson, spring-transaction. |
+| `DependencyFlowTest.java` | 2 reglas: domain no depende de application/infrastructure, application no depende de infrastructure. |
+| `pom.xml` (root) | `<module>architecture-tests</module>` al final de `<modules>`. |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Enforcement de boundaries | Manual (disciplina) | Automatico (8 tests ArchUnit) |
+| Tests de arquitectura | 0 | 8 (5 domain + 1 application + 2 flow) |
+| Modulos en build | 19 | 20 (+architecture-tests) |
+| Tiempo de build extra | 0s | ~5s (analisis estatico en memoria) |
+| `mvn verify` resultado | BUILD SUCCESS (492 tests) | BUILD SUCCESS (500 tests) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Allowlist expandida vs spec original
+
+La spec original definia allowlist de application como: domain, common, java, lombok, spring-transaction. Al ejecutar los tests, ArchUnit detecto que el SAGA orchestrator en application usa `com.fasterxml.jackson` (serializacion de saga data) y `org.slf4j` (logging). Ambas son dependencias legitimas — Jackson es framework-agnostico y SLF4J es solo una API de logging. Se expandio el allowlist y se actualizaron specs y design.
+
+#### 2. ImportOption.DoNotIncludeTests
+
+Todas las clases de test usan `ImportOption.DoNotIncludeTests.class` para que ArchUnit solo analice codigo de produccion. Sin esto, las clases de test (que legitimamente importan Spring, JPA, etc.) generarian falsos positivos.
+
+#### 3. Modulo dedicado vs tests distribuidos
+
+Un solo modulo `architecture-tests` con todas las reglas, no tests en cada `*-container`. Esto evita duplicar las mismas reglas 4 veces. El modulo depende de los 4 `*-infrastructure` (transitivamente trae application + domain), asi que tiene todas las clases en classpath.
+
 ### Lecciones aprendidas
 
 - **JaCoCo como quality gate permanente es el paso natural despues de estabilizar los tests**: Con 492 tests pasando, el riesgo ya no es "no tenemos tests" sino "alguien agrega codigo sin tests y la cobertura baja silenciosamente". El check automatico previene esa regresion.
