@@ -54,16 +54,43 @@
 - [x] PaymentProcessListenerIT + PaymentRefundListenerIT (raw Message + Awaitility)
 - [x] Todos los tests pasan (69 unit + 18 ITs)
 
-## Change 5: reservation-saga-orchestration [PENDIENTE]
+## Change 5: reservation-saga-orchestration [COMPLETADO]
 
-- [ ] SagaOrchestrator + SagaState + SagaStep interface
-- [ ] Response listeners en Reservation
-- [ ] Compensation flows (Fleet rechaza -> refund Payment -> cancel)
-- [ ] MDC/correlationId propagation
-- [ ] SAGA integration tests con Awaitility
+- [x] SagaStatus enum (STARTED→PROCESSING→SUCCEEDED/COMPENSATING→FAILED) con canTransitionTo()
+- [x] SagaState domain object (create/reconstruct, 6 metodos de transicion, version nullable)
+- [x] SagaStateRepository output port + SagaStateJpaEntity (@Version optimistic locking)
+- [x] SagaStep<T> interface + 3 implementaciones (CustomerValidation, Payment, FleetConfirmation)
+- [x] ReservationSagaOrchestrator (start, handleStepSuccess, handleStepFailure, handleCompensationComplete)
+- [x] OutboxSagaCommandPublisher (comandos via outbox, aggregateType "SAGA")
+- [x] 7 Response listeners en Reservation (validated/rejected × customer/payment/fleet + refunded)
+- [x] RabbitMQConfig: 3 participant exchanges, 7 response queues, 7 bindings con DLQ
+- [x] V3__create_saga_state_table.sql (saga_id UUID PK, version, indice en status)
+- [x] BeanConfiguration: 5 nuevos beans + ReservationApplicationService con 4to parametro
+- [x] Compensation flow funcional: Fleet rejected → Payment refund → cancel
+- [x] 50 unit tests nuevos (30 domain + 20 application) — total 160 unit tests reservation
+- [x] 5 SAGA ITs (happy path, customer rejection, payment failure, fleet rejection, saga state persistence)
+- [x] Todos los tests pasan (160 unit + 20 ITs = 180 total reservation-service)
 
-## Post-SAGA (change dedicado)
+---
 
+## SAGA Orchestration — COMPLETADA
+
+El flujo SAGA end-to-end esta operativo:
+1. POST /api/v1/reservations → crea Reservation + SagaState → publica customer.validate.command
+2. Customer validated → avanza a Payment → publica payment.process.command
+3. Payment completed → avanza a Fleet → publica fleet.confirm.command
+4. Fleet confirmed → marca SAGA como SUCCEEDED, Reservation como CONFIRMED
+
+Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Reservation → SAGA FAILED
+
+---
+
+## Post-SAGA (changes dedicados)
+
+- [ ] SAGA timeout/retry handling (que pasa si un participante no responde?)
+- [ ] Idempotencia de listeners (evitar procesar el mismo mensaje dos veces)
+- [ ] MDC/correlationId propagation (tracing distribuido)
+- [ ] End-to-end testing con Docker Compose (4 servicios simultaneos)
 - [ ] Mover spring-boot-starter-test a dependencyManagement (domain zero-Spring)
 - [ ] ArchUnit tests para boundaries hexagonales
 - [ ] Indices en BD (status, email, category)

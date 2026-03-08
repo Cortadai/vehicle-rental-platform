@@ -42,8 +42,8 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
  |   |                  |      |                      |
  |   |  Aggregate Root  |      |  Use Cases (ports)   |
  |   |  Value Objects   |      |  Application Service |
- |   |  Domain Events   |      |  Mappers             |
- |   |  Domain Ports    |      |                      |
+ |   |  Domain Events   |      |  SAGA Orchestrator   |
+ |   |  Domain Ports    |      |  SAGA Steps          |
  |   +------------------+      +---------------------+
  |            ^                          ^
  |            |                          |
@@ -53,7 +53,8 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
  |   |                                             |
  |   |  REST Controllers    JPA Repositories       |
  |   |  Persistence Mapper  Event Publisher         |
- |   |  RabbitMQ Config     Payment Gateway (*)     |
+ |   |  RabbitMQ Config     SAGA Response Listeners |
+ |   |  Command Listeners   Payment Gateway (*)     |
  |   +---------------------------------------------+
  |            ^
  |            |
@@ -72,8 +73,8 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 19 changes completados                              Fase actual
- ========================                            ==========
+ 21 changes completados — SAGA Orchestration OPERATIVA
+ =======================================================
 
   #1  parent-pom-multi-module          }
   #2  customer-domain                  }
@@ -95,13 +96,48 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #16 payment-outbox-and-messaging     }  Messaging
 
   #17 pre-saga-alignment               }  Alignment
-  #18 customer-outbox-and-messaging    }  Conectar al bus
-  #19 fleet-outbox-and-messaging       }  Conectar al bus
-  #20 payment-saga-participation       }  Conectar al bus  <-- ESTAMOS AQUI
+  #18 customer-outbox-and-messaging    }  Participante SAGA
+  #19 fleet-outbox-and-messaging       }  Participante SAGA
+  #20 payment-saga-participation       }  Participante SAGA
+  #21 reservation-saga-orchestration   }  SAGA Orchestrator  ← COMPLETADO
+```
 
-  --- Proximos pasos -------------------------------------------------
+## Flujo SAGA End-to-End
 
-  #21 reservation-saga-orchestration   }  SAGA         <-- OBJETIVO
+```
+  POST /reservations
+        |
+        v
+  Reservation Service (Orchestrator)
+  +-----------------------------------------------------------------+
+  |  1. create() -> PENDING + ReservationCreatedEvent               |
+  |  2. sagaOrchestrator.start() -> SagaState(PROCESSING, step=0)  |
+  |  3. Step[0]: customer.validate.command (via outbox)             |
+  +-----------------------------------------------------------------+
+        |                                       |
+        v                                       v (si rechaza)
+  Customer Service                         CANCELLED + SAGA FAILED
+  customer.validated ->                    (sin compensacion)
+        |
+        v
+  Reservation: CUSTOMER_VALIDATED, step=1
+  Step[1]: payment.process.command
+        |                                       |
+        v                                       v (si falla)
+  Payment Service                          CANCELLED + SAGA FAILED
+  payment.completed ->                     (sin compensacion — no hay que revertir)
+        |
+        v
+  Reservation: PAID, step=2
+  Step[2]: fleet.confirm.command
+        |                           |
+        v                           v (si rechaza)
+  Fleet Service                 CANCELLING + SAGA COMPENSATING
+  fleet.confirmed ->            -> payment.refund.command
+        |                           |
+        v                           v
+  CONFIRMED                    payment.refunded ->
+  SAGA SUCCEEDED               CANCELLED + SAGA FAILED
 ```
 
 ## Mapa de Modulos (19)
@@ -128,20 +164,21 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 |  | 66 T   | 21 T   | 0 T    |     | 63 T   | 22 T   | 0 T    |  |
 |  +--------+--------+--------+     +--------+--------+--------+  |
 |  | container        14 IT   |     | container        15 IT   |  |
-|  | OUTBOX -> RabbitMQ        |     | OUTBOX -> RabbitMQ        |  |
+|  | 1 @RabbitListener         |     | 2 @RabbitListeners        |  |
 |  +---------------------------+     +---------------------------+  |
 |                                                                  |
 |  Reservation Service (:8182)       Payment Service (:8184)       |
 |  +--------+--------+--------+     +--------+--------+--------+  |
 |  | domain | app    | infra  |     | domain | app    | infra  |  |
-|  | 80 T   | 18 T   | 0 T    |     | 51 T   | 18 T   | 0 T    |  |
+|  | 110 T  | 38 T   | 0 T    |     | 51 T   | 18 T   | 0 T    |  |
 |  +--------+--------+--------+     +--------+--------+--------+  |
-|  | container        13 IT   |     | container        16 IT   |  |
-|  | OUTBOX -> RabbitMQ        |     | OUTBOX -> RabbitMQ        |  |
+|  | container        20 IT   |     | container        18 IT   |  |
+|  | 7 @RabbitListeners (SAGA) |     | 2 @RabbitListeners        |  |
+|  | SAGA Orchestrator          |     |                           |  |
 |  +---------------------------+     +---------------------------+  |
 |                                                                  |
 |  T = unit tests    IT = integration tests                        |
-|  Total: 433 tests, 0 failures                                   |
+|  Total: 492 tests (425 unit + 67 IT), 0 failures               |
 +------------------------------------------------------------------+
 ```
 
@@ -160,20 +197,26 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 |  | fleet.exchange       |                  v                     |
 |  +---------------------+       +---------------------+          |
 |                                 | reservation.dlq    |          |
-|  Event Queues (8)               | customer.dlq       |          |
-|  +---------------------------+  | payment.dlq        |          |
-|  | reservation.created.queue |  | fleet.dlq          |          |
+|  Response Queues (8)            | customer.dlq       |          |
+|  consumidas por Orchestrator    | payment.dlq        |          |
+|  +---------------------------+  | fleet.dlq          |          |
 |  | customer.validated.queue  |  +---------------------+          |
 |  | customer.rejected.queue   |                                   |
 |  | payment.completed.queue   |  Command Queues (5) -- SAGA      |
-|  | payment.failed.queue      |  +--------------------------------+
-|  | payment.refunded.queue    |  | customer.validate.command.queue |
-|  | fleet.confirmed.queue     |  | payment.process.command.queue  |
-|  | fleet.rejected.queue      |  | payment.refund.command.queue   |
-|  +---------------------------+  | fleet.confirm.command.queue    |
-|                                 | fleet.release.command.queue    |
-|                                 +--------------------------------+
-|  Total: 5 exchanges, 17 queues, 26 bindings                     |
+|  | payment.failed.queue      |  consumidas por Participantes    |
+|  | payment.refunded.queue    |  +--------------------------------+
+|  | fleet.confirmed.queue     |  | customer.validate.command.queue |
+|  | fleet.rejected.queue      |  | payment.process.command.queue  |
+|  +---------------------------+  | payment.refund.command.queue   |
+|                                 | fleet.confirm.command.queue    |
+|  Event Queue (1)                | fleet.release.command.queue    |
+|  +---------------------------+  +--------------------------------+
+|  | reservation.created.queue |                                   |
+|  +---------------------------+                                   |
+|                                                                  |
+|  @RabbitListeners: 12 (1 Customer + 2 Fleet + 2 Payment         |
+|                        + 7 Reservation SAGA response)            |
+|  Total: 5 exchanges, 18 queues, 28 bindings                     |
 +------------------------------------------------------------------+
 ```
 
@@ -192,10 +235,10 @@ Cobertura por capa (lineas):
   | Modulo                    | Tests | Cobertura |
   +---------------------------+-------+-----------+
   | customer-domain           |    66 |     100%  |
-  | reservation-domain        |    80 |     100%  |
+  | reservation-domain        |   110 |     100%  |
   | payment-domain            |    51 |     100%  |
   | fleet-domain              |    63 |      96%  |
-  | reservation-application   |    18 |     100%  |
+  | reservation-application   |    38 |     100%  |
   | customer-application      |    21 |      98%  |
   | fleet-application         |    22 |      98%  |
   | payment-application       |    18 |      98%  |
@@ -203,10 +246,10 @@ Cobertura por capa (lineas):
   | common-messaging          |     5 |      83%  |
   | customer-container        |    14 |      83%  |
   | fleet-container           |    15 |      83%  |
-  | reservation-container     |    13 |      78%  |
-  | payment-container         |    16 |      78%  |
+  | reservation-container     |    20 |      78%  |
+  | payment-container         |    18 |      78%  |
   +---------------------------+-------+-----------+
-  | TOTAL                     |   433 |           |
+  | TOTAL                     |   492 |           |
   +---------------------------+-------+-----------+
 
   Generado con: mvn clean verify -Pcoverage
@@ -221,10 +264,11 @@ Cobertura por capa (lineas):
   | Hexagonal Arch     | Completo - 4 servicios x 4 modulos         |
   | DDD Tactical       | Aggregates, VOs, Domain Events, Ports      |
   | Outbox Pattern     | Completo - 4 servicios con outbox           |
-  | SAGA Orchestration | Pendiente - topologia lista                |
+  | SAGA Orchestration | Completo - 3 steps, compensacion inversa   |
   | Database per Svc   | 4 PostgreSQL databases independientes      |
   | Event-Driven       | RabbitMQ con topic exchanges + DLQ         |
   | Typed IDs          | ReservationId, PaymentId, etc. (records)   |
+  | Optimistic Locking | @Version en SagaState para concurrencia    |
   | Test Strategy      | Domain Test-First, Infra Test-After        |
   +--------------------+--------------------------------------------+
 ```
@@ -235,13 +279,14 @@ Cobertura por capa (lineas):
   COMPLETADO                          PENDIENTE
   ==========                          =========
 
-  [x] 4 servicios hexagonales         [ ] SAGA Orchestrator
-  [x] 4 capas por servicio            [ ] Compensation flows
+  [x] 4 servicios hexagonales         [ ] SAGA timeout / retry
+  [x] 4 capas por servicio            [ ] Idempotencia de listeners
   [x] Outbox en 4 servicios           [ ] MDC / Correlation ID
-  [x] Topologia RabbitMQ completa     [ ] ArchUnit tests
-  [x] Command queues para SAGA (5)    [ ] OpenAPI docs
-  [x] 3 @RabbitListeners (consumers)
-  [x] 433 tests pasando
+  [x] Topologia RabbitMQ completa     [ ] E2E test (Docker Compose)
+  [x] 12 @RabbitListeners             [ ] ArchUnit tests
+  [x] SAGA Orchestrator               [ ] OpenAPI docs
+  [x] Compensation flows              [ ] JaCoCo permanente
+  [x] 492 tests pasando
   [x] JaCoCo (profile)
 ```
 
