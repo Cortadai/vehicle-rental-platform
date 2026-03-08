@@ -18,6 +18,10 @@
     <name>Fleet Service - Container</name>
     <description>Fleet container layer: Spring Boot main class, BeanConfiguration, and application configuration.</description>
 
+    <properties>
+        <jacoco.skip>true</jacoco.skip>
+    </properties>
+
     <dependencies>
         <!-- Internal modules -->
         <dependency>

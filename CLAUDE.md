@@ -112,10 +112,10 @@ This applies to ALL services: Reservation, Customer, Fleet, Payment.
 # Build all modules
 mvn clean install
 
-# Run unit tests only
+# Run unit tests only (includes JaCoCo coverage check)
 mvn test
 
-# Run unit + integration tests
+# Run unit + integration tests (includes JaCoCo coverage check on merged data)
 mvn verify
 
 # Start infrastructure (PostgreSQL + RabbitMQ)
@@ -125,3 +125,5 @@ docker compose --profile infra up -d
 cd reservation-service/reservation-container
 mvn spring-boot:run
 ```
+
+JaCoCo is permanently active (no profile needed). Coverage thresholds: domain/common 80%, application 75%, infrastructure 60%. Container modules are excluded via `jacoco.skip`.
