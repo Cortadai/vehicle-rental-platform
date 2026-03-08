@@ -90,7 +90,7 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] SAGA timeout/retry handling (que pasa si un participante no responde?)
 - [ ] Idempotencia de listeners (evitar procesar el mismo mensaje dos veces)
 - [ ] MDC/correlationId propagation (tracing distribuido)
-- [ ] End-to-end testing con Docker Compose (4 servicios simultaneos)
+- [x] Docker Compose con 4 servicios — Paketo images, Actuator health, Spring Boot 3.4.13 (change #24)
 - [ ] Mover spring-boot-starter-test a dependencyManagement (domain zero-Spring)
 - [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
 - [ ] Indices en BD (status, email, category)

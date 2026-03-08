@@ -2615,3 +2615,57 @@ Con JaCoCo como red de seguridad, los posibles siguientes pasos son:
 - **SAGA timeout/retry handling** — que pasa si un participante no responde?
 - **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
 - **Monitoring/observability** — MDC + tracing distribuido
+
+---
+
+## Ciclo #24: docker-compose-services (2026-03-08)
+
+### Que se hizo
+
+Se configuro Docker Compose para levantar la plataforma completa (4 microservicios + PostgreSQL + RabbitMQ) con un solo `docker compose up -d`. Incluye:
+
+- **Actuator health**: `spring-boot-starter-actuator` en los 4 container POMs, solo endpoint `health` expuesto
+- **Paketo images**: `mvn spring-boot:build-image` genera imagenes OCI sin Dockerfiles, naming `vehicle-rental/<service>:latest`
+- **Docker Compose reescrito**: eliminado `profiles: [infra]`, 4 bloques de servicio con puertos, env vars, depends_on
+- **Spring Boot 3.4.1 → 3.4.13**: upgrade necesario porque 3.4.1 hardcodeaba Docker API v1.24 (incompatible con Docker 29.x)
+- **BeanConfiguration simplificados**: Spring 6.2 trackea runtime types, los wrappers de use cases causaban ambiguedad de beans
+- **RabbitMQ definitions.json**: corregido `password_hash: "guest"` a `password: "guest"` (RabbitMQ 3.13 requiere hash base64 valido)
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Containers en compose | 2 (infra only) | 6 (infra + 4 servicios) |
+| Comando para full stack | N/A (manual `mvn spring-boot:run` × 4) | `docker compose up -d` |
+| Spring Boot version | 3.4.1 | 3.4.13 |
+| `@Bean` en BeanConfigs | ~20 (con wrappers) | ~12 (solo servicios principales) |
+| `mvn verify` resultado | BUILD SUCCESS (500 tests) | BUILD SUCCESS (500 tests) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Sin Docker healthcheck en servicios (Paketo limitation)
+
+Las imagenes Paketo (Bellsoft Liberica tiny stack) no incluyen curl, wget, bash ni ningun shell utility. No hay forma practica de ejecutar un healthcheck CMD-SHELL desde dentro del container. Se verifica health externamente con `curl localhost:<port>/actuator/health`. Infrastructure (postgres, rabbitmq) conserva healthchecks nativos.
+
+#### 2. Spring Boot 3.4.13 — no solo un version bump
+
+El upgrade a 3.4.13 trajo Spring Framework 6.2, que cambia como Spring resuelve tipos de beans en runtime. Antes, si un `@Bean` method devuelve `CustomerApplicationService`, Spring solo registra ese tipo concreto. Ahora Spring infiere **todos** los tipos que implementa (interfaces incluidas). Esto causo ambiguedad con los beans wrapper de use cases que devolvian la misma instancia. Solucion: eliminar los wrappers — Spring resuelve las interfaces directamente.
+
+#### 3. RabbitMQ `password` vs `password_hash`
+
+En definitions.json, usar `"password": "guest"` en vez de `"password_hash": "guest"` + `"hashing_algorithm"`. RabbitMQ 3.13 hashea internamente cuando recibe `password` en plaintext. El campo `password_hash` requiere un hash SHA-256 base64-encoded valido — `"guest"` literal no lo es.
+
+### Lecciones aprendidas
+
+- **Paketo images son MUY minimalistas**: No asumas que tienen herramientas CLI (curl, wget, bash, ls, java en PATH). Para healthchecks en Docker Compose, necesitas alternativas externas o un health-checker buildpack dedicado.
+- **Los upgrades de Spring Boot menores pueden tener breaking changes sutiles**: 3.4.1 → 3.4.13 parece inocuo pero Spring 6.2 cambia semantica de bean resolution. Siempre ejecutar `mvn verify` despues de un upgrade.
+- **definitions.json de RabbitMQ tiene trampas**: El campo `password_hash` NO acepta passwords en texto plano aunque el nombre sugiera que es un hash. Usa `password` para que RabbitMQ hashee internamente.
+- **`docker compose down -v` es tu amigo para debugging de infra**: Cuando algo falla en RabbitMQ o PostgreSQL, los volumenes persistidos pueden tener estado corrupto. `-v` fuerza reinicio limpio.
+- **El flujo OpenSpec funciona bien para changes de infraestructura**: Proposal → Design → Specs → Tasks aplica igual para Docker Compose que para features de codigo. Las decisiones D7-D9 (descubiertas durante implementacion) se documentaron retroactivamente en design.md.
+
+### Siguiente paso
+
+Con la plataforma levantando en Docker Compose, los posibles siguientes pasos son:
+- **E2E testing con Bruno CLI** — colecciones .bru en git, tests contra los 4 servicios
+- **SAGA timeout/retry handling** — que pasa si un participante no responde?
+- **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
