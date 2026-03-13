@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "Vehicle Rental Platform",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

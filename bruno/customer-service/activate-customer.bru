@@ -1,0 +1,11 @@
+meta {
+  name: Activate Customer
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{customerUrl}}/api/v1/customers/{{customerId}}/activate
+  body: none
+  auth: none
+}

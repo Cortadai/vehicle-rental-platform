@@ -1,0 +1,35 @@
+meta {
+  name: 02 Register Vehicle
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{fleetUrl}}/api/v1/vehicles
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "licensePlate": "TEST-{{$timestamp}}",
+    "make": "Toyota",
+    "model": "Corolla",
+    "year": 2024,
+    "category": "SEDAN",
+    "dailyRateAmount": 45.00,
+    "dailyRateCurrency": "USD"
+  }
+}
+
+assert {
+  res.status: eq 201
+}
+
+script:post-response {
+  bru.setVar("vehicleId", res.body.data.vehicleId);
+}

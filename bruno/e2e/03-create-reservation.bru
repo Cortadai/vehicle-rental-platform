@@ -1,0 +1,44 @@
+meta {
+  name: 03 Create Reservation
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{reservationUrl}}/api/v1/reservations
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "customerId": "{{customerId}}",
+    "pickupAddress": "123 Main St",
+    "pickupCity": "Madrid",
+    "returnAddress": "456 Park Ave",
+    "returnCity": "Madrid",
+    "pickupDate": "2026-04-01",
+    "returnDate": "2026-04-05",
+    "currency": "USD",
+    "items": [
+      {
+        "vehicleId": "{{vehicleId}}",
+        "dailyRate": 45.00,
+        "days": 4
+      }
+    ]
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.status: eq PENDING
+}
+
+script:post-response {
+  bru.setVar("trackingId", res.body.data.trackingId);
+}

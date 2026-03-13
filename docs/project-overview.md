@@ -73,7 +73,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 22 changes completados — SAGA Orchestration + JaCoCo permanente
+ 25 changes completados — SAGA Orchestration + Quality Gates + E2E
  ================================================================
 
   #1  parent-pom-multi-module          }
@@ -101,7 +101,10 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #20 payment-saga-participation       }  Participante SAGA
   #21 reservation-saga-orchestration   }  SAGA Orchestrator
 
-  #22 jacoco-permanent-coverage        }  Quality Gate  ← COMPLETADO
+  #22 jacoco-permanent-coverage        }  Quality Gate
+  #23 archunit-architecture-tests      }  Quality Gate
+  #24 docker-compose-services          }  Infrastructure
+  #25 bruno-e2e-tests                  }  E2E Testing + bugfix payment events
 ```
 
 ## Flujo SAGA End-to-End
@@ -142,7 +145,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   SAGA SUCCEEDED               CANCELLED + SAGA FAILED
 ```
 
-## Mapa de Modulos (19)
+## Mapa de Modulos (20)
 
 ```
 +------------------------------------------------------------------+
@@ -251,11 +254,14 @@ Cobertura por capa (lineas):
   | reservation-container     |    20 |      78%  |
   | payment-container         |    18 |      78%  |
   +---------------------------+-------+-----------+
-  | TOTAL                     |   492 |           |
+  | TOTAL                     |   500 |           |
   +---------------------------+-------+-----------+
 
   JaCoCo permanente (sin profile). Umbrales: domain/common 80%,
   application 75%, infrastructure 60%. Containers excluidos.
+
+  Bruno E2E: 4 requests, 6 assertions — happy path SAGA
+  (PENDING → CONFIRMED) contra Docker Compose.
 ```
 
 ## Patrones Implementados
@@ -286,20 +292,24 @@ Cobertura por capa (lineas):
   [x] 4 servicios hexagonales         [ ] SAGA timeout / retry
   [x] 4 capas por servicio            [ ] Idempotencia de listeners
   [x] Outbox en 4 servicios           [ ] MDC / Correlation ID
-  [x] Topologia RabbitMQ completa     [ ] E2E test (Docker Compose)
-  [x] 12 @RabbitListeners             [ ] ArchUnit tests
-  [x] SAGA Orchestrator               [ ] OpenAPI docs
+  [x] Topologia RabbitMQ completa     [ ] OpenAPI docs
+  [x] 12 @RabbitListeners             [ ] E2E compensation flow
+  [x] SAGA Orchestrator
   [x] Compensation flows
-  [x] 492 tests pasando
+  [x] 500 tests pasando
   [x] JaCoCo permanente (80/75/60%)
+  [x] ArchUnit hexagonal boundaries
+  [x] Docker Compose (4 servicios)
+  [x] Bruno E2E happy path SAGA
 ```
 
 ## Stack Tecnologico
 
 ```
-  Java 21 | Spring Boot 3.4.1 | Maven multi-module
+  Java 21 | Spring Boot 3.4.13 | Maven multi-module
   PostgreSQL | Flyway | Spring Data JPA
   RabbitMQ | Spring AMQP | Outbox Pattern
   JUnit 5 | Mockito | Testcontainers | Awaitility
   JaCoCo 0.8.12 (permanente, check con umbrales) | Lombok
+  ArchUnit | Bruno CLI (E2E) | Docker Compose (Paketo images)
 ```

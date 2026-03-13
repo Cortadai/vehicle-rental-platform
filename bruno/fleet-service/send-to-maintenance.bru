@@ -1,0 +1,11 @@
+meta {
+  name: Send to Maintenance
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{fleetUrl}}/api/v1/vehicles/{{vehicleId}}/maintenance
+  body: none
+  auth: none
+}

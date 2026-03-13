@@ -1,0 +1,11 @@
+meta {
+  name: Activate Vehicle
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{fleetUrl}}/api/v1/vehicles/{{vehicleId}}/activate
+  body: none
+  auth: none
+}

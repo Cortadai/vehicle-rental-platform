@@ -2669,3 +2669,117 @@ Con la plataforma levantando en Docker Compose, los posibles siguientes pasos so
 - **E2E testing con Bruno CLI** — colecciones .bru en git, tests contra los 4 servicios
 - **SAGA timeout/retry handling** — que pasa si un participante no responde?
 - **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
+
+---
+
+## Ciclo #25: bruno-e2e-tests (2026-03-13)
+
+### Que se hizo
+
+Coleccion Bruno versionable en Git con requests para los 4 microservicios y una secuencia E2E que valida el happy path SAGA completo (PENDING → CONFIRMED) contra Docker Compose. Durante la verificacion se descubrio y corrigio un bug critico en la serializacion de domain events del payment-service que rompia la SAGA entera.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `bruno/bruno.json` | Metadata de coleccion Bruno |
+| `bruno/environments/local.bru` | Environment con URLs de los 4 servicios (localhost:8181-8184) |
+| `bruno/customer-service/*.bru` (5) | Requests: create, get, suspend, activate, delete customer |
+| `bruno/fleet-service/*.bru` (5) | Requests: register, get, maintenance, activate, retire vehicle |
+| `bruno/reservation-service/*.bru` (2) | Requests: create reservation, track reservation |
+| `bruno/payment-service/*.bru` (3) | Requests: process payment, refund, get payment |
+| `bruno/e2e/01-create-customer.bru` | POST + assert 201 + extract `customerId` via `bru.setVar()` |
+| `bruno/e2e/02-register-vehicle.bru` | POST + assert 201 + extract `vehicleId` via `bru.setVar()` |
+| `bruno/e2e/03-create-reservation.bru` | POST con IDs encadenados + assert 201 + assert PENDING + extract `trackingId` |
+| `bruno/e2e/04-verify-confirmed.bru` | GET + assert 200 + assert CONFIRMED |
+| `PaymentCompletedEvent.java` | **Bugfix**: `ReservationId` → `UUID` para serializacion correcta |
+| `PaymentFailedEvent.java` | **Bugfix**: `ReservationId` → `UUID` |
+| `PaymentRefundedEvent.java` | **Bugfix**: `ReservationId` → `UUID` |
+| `Payment.java` (aggregate) | Adaptado: `.reservationId` → `.reservationId.value()` al crear eventos |
+| `PaymentDomainEventsTest.java` | Adaptado: `RESERVATION_ID` de `ReservationId` a `UUID` |
+| `CLAUDE.md` | Seccion "Bruno E2E Tests" con instrucciones de ejecucion |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| E2E testing | Ninguno | 4 requests, 6 assertions, happy path SAGA validado |
+| Ficheros Bruno | 0 | 20 (.bru) + 1 (bruno.json) |
+| Bug SAGA payment | SAGA rota (stuck en CUSTOMER_VALIDATED) | SAGA funcional (PENDING → CONFIRMED) |
+| `mvn test` resultado | BUILD SUCCESS (500 tests) | BUILD SUCCESS (500 tests) |
+| `bru run --env local e2e` | N/A | PASS (4/4 requests, 6/6 assertions) |
+
+### El bug: SAGA atascada en CUSTOMER_VALIDATED
+
+Este fue el hallazgo mas importante del change. Al ejecutar el E2E, la SAGA nunca pasaba de `CUSTOMER_VALIDATED` — el estado se quedaba ahi indefinidamente.
+
+#### Sintoma
+
+```
+✓ res.body.data.status: eq PENDING
+✕ res.body.data.status: eq CONFIRMED
+  expected 'CUSTOMER_VALIDATED' to equal 'CONFIRMED'
+```
+
+#### Investigacion
+
+1. **Logs del reservation-service** mostraban errores repetitivos:
+   ```
+   Caused by: java.lang.IllegalArgumentException: Invalid UUID string:
+     at PaymentCompletedResponseListener.handle(PaymentCompletedResponseListener.java:31)
+   ```
+   El UUID era un string vacio.
+
+2. **Traza del flujo SAGA**: el CustomerValidationStep completaba bien, el PaymentStep publicaba el comando al payment-service, el payment-service procesaba y publicaba `PaymentCompletedEvent` via outbox... pero el reservation-service crasheaba al deserializar la respuesta.
+
+3. **Root cause**: inconsistencia en como los servicios serializan `reservationId` en domain events.
+
+   | Servicio | Tipo en evento | JSON resultante |
+   |----------|---------------|-----------------|
+   | Customer | `UUID` | `"reservationId": "abc-123"` ✅ |
+   | Fleet | `UUID` | `"reservationId": "abc-123"` ✅ |
+   | **Payment** | `ReservationId` (value object) | `"reservationId": {"value": "abc-123"}` ❌ |
+
+   Jackson serializa el value object `ReservationId(UUID value)` como un objeto anidado. El listener hacia `json.get("reservationId").asText()` — que sobre un ObjectNode devuelve `""` — y `UUID.fromString("")` lanzaba la excepcion. El mensaje se NACKeaba y reencolaba infinitamente.
+
+#### Solucion
+
+Cambiar los 3 domain events de payment para usar `UUID` raw en vez del value object `ReservationId`, consistente con customer y fleet. El value object `ReservationId` tiene sentido dentro del aggregate de Payment, pero en domain events que cruzan fronteras de bounded context, el tipo primitivo es lo correcto.
+
+### Problema secundario: pre-request scripts en Bruno CLI
+
+Los bloques `script:pre-request` con `await new Promise(...)` y tambien busy-waits sincronos son **ignorados completamente** por Bruno CLI (v2.x). Se probo `await`, `setTimeout`, y un `while(Date.now() - start < delay)` — ninguno se ejecutaba (duracion del request siempre ~30-40ms). No afecto al resultado final porque la SAGA completa en ~2s, antes de que el 4to request se envie. El script se dejo con `await` y un comentario — funciona en la UI de Bruno para uso manual.
+
+### Decisiones de diseno relevantes
+
+#### 1. Carpetas por servicio + e2e separada
+
+Los requests por servicio (`customer-service/`, `fleet-service/`, etc.) sirven para exploracion manual desde la UI de Bruno. La carpeta `e2e/` es lo que ejecuta `bru run`. Separacion clara de propositos.
+
+#### 2. Prefijo numerico para orden
+
+`bru run` ejecuta ficheros en orden alfabetico dentro de la carpeta. Los prefijos `01-`, `02-`, `03-`, `04-` garantizan la secuencia correcta sin configuracion adicional.
+
+#### 3. `{{$timestamp}}` para unicidad
+
+Campos con constraint de unicidad (email del customer, licensePlate del vehicle) usan `{{$timestamp}}` de Bruno. Permite ejecutar `bru run` multiples veces sin conflictos y sin resetear la BD.
+
+#### 4. Variables de coleccion para encadenar IDs
+
+`bru.setVar("customerId", res.body.data.customerId)` en post-response scripts. Las variables se resuelven con `{{customerId}}` en los requests siguientes. Es el mecanismo nativo de Bruno.
+
+### Lecciones aprendidas
+
+- **Los domain events que cruzan fronteras de bounded context deben usar tipos primitivos (UUID, String) para IDs foraneos, no value objects del dominio local.** Jackson serializa value objects como objetos anidados (`{"value": "..."}`) mientras que el consumidor espera un string plano. Customer y Fleet ya seguian este patron. Payment no — y rompio silenciosamente la SAGA entera. Este bug solo se manifesto con los 4 servicios corriendo simultaneamente; los 500 unit + integration tests no lo detectaban porque los ITs mockean las respuestas de otros servicios con Maps planos.
+- **El E2E testing contra Docker Compose descubre bugs que ningun otro nivel de testing encuentra.** Este bug existia desde que se implemento el payment-service, pero ni los unit tests del domain, ni los ITs con Testcontainers, ni los tests del SAGA orchestrator lo detectaban — porque todos simulan las respuestas inter-servicio.
+- **Bruno CLI tiene limitaciones vs la UI**: los `script:pre-request` no se ejecutan en la CLI. Para delays, habria que usar un wrapper bash. En este caso no fue necesario porque la SAGA es suficientemente rapida.
+- **`docker compose up -d --force-recreate <service>` puede tumbar otros servicios**: al recrear solo payment-service, los containers de customer, fleet y reservation desaparecieron. Para redeploys parciales, verificar siempre con `docker compose ps` despues.
+- **Los mensajes envenenados en RabbitMQ deben purgarse tras un fix**: el PaymentCompletedEvent mal serializado se reencolaba infinitamente. Tras deployar el fix, fue necesario purgar la cola manualmente (`curl -X DELETE .../contents`) antes de que los nuevos mensajes pudieran procesarse.
+
+### Siguiente paso
+
+Con el E2E validando el happy path SAGA completo, los posibles siguientes pasos son:
+- **SAGA timeout/retry handling** — que pasa si un participante no responde?
+- **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
+- **Monitoring/observability** — MDC + tracing distribuido
+- **E2E de compensation flow** — validar que la SAGA compensa correctamente cuando falla un paso

@@ -5,7 +5,6 @@ import com.vehiclerental.common.domain.vo.Money;
 import com.vehiclerental.payment.domain.exception.PaymentDomainException;
 import com.vehiclerental.payment.domain.model.vo.CustomerId;
 import com.vehiclerental.payment.domain.model.vo.PaymentId;
-import com.vehiclerental.payment.domain.model.vo.ReservationId;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -22,7 +21,7 @@ class PaymentDomainEventsTest {
     private static final UUID EVENT_ID = UUID.randomUUID();
     private static final Instant OCCURRED_ON = Instant.now();
     private static final PaymentId PAYMENT_ID = new PaymentId(UUID.randomUUID());
-    private static final ReservationId RESERVATION_ID = new ReservationId(UUID.randomUUID());
+    private static final UUID RESERVATION_ID = UUID.randomUUID();
     private static final CustomerId CUSTOMER_ID = new CustomerId(UUID.randomUUID());
     private static final Currency EUR = Currency.getInstance("EUR");
     private static final Money AMOUNT = new Money(new BigDecimal("150.00"), EUR);

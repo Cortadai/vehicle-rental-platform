@@ -91,6 +91,7 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] Idempotencia de listeners (evitar procesar el mismo mensaje dos veces)
 - [ ] MDC/correlationId propagation (tracing distribuido)
 - [x] Docker Compose con 4 servicios — Paketo images, Actuator health, Spring Boot 3.4.13 (change #24)
+- [x] Bruno E2E tests — coleccion Bruno + happy path SAGA validado + bugfix serializacion payment events (change #25)
 - [ ] Mover spring-boot-starter-test a dependencyManagement (domain zero-Spring)
 - [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
 - [ ] Indices en BD (status, email, category)
@@ -99,3 +100,4 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] Evaluar MapStruct vs mappers manuales
 - [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
 - [ ] Tests para ApiMetadata/ApiResponse en common
+- [ ] E2E de compensation flow (validar que la SAGA compensa correctamente)

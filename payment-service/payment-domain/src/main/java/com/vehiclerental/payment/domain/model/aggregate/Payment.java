@@ -75,7 +75,7 @@ public class Payment extends AggregateRoot<PaymentId> {
         status = PaymentStatus.COMPLETED;
         updatedAt = Instant.now();
         registerDomainEvent(new PaymentCompletedEvent(
-                UUID.randomUUID(), Instant.now(), getId(), reservationId, customerId, amount));
+                UUID.randomUUID(), Instant.now(), getId(), reservationId.value(), customerId, amount));
     }
 
     public void fail(List<String> failureMessages) {
@@ -91,7 +91,7 @@ public class Payment extends AggregateRoot<PaymentId> {
         status = PaymentStatus.FAILED;
         updatedAt = Instant.now();
         registerDomainEvent(new PaymentFailedEvent(
-                UUID.randomUUID(), Instant.now(), getId(), reservationId, List.copyOf(failureMessages)));
+                UUID.randomUUID(), Instant.now(), getId(), reservationId.value(), List.copyOf(failureMessages)));
     }
 
     public void refund() {
@@ -102,7 +102,7 @@ public class Payment extends AggregateRoot<PaymentId> {
         status = PaymentStatus.REFUNDED;
         updatedAt = Instant.now();
         registerDomainEvent(new PaymentRefundedEvent(
-                UUID.randomUUID(), Instant.now(), getId(), reservationId, amount));
+                UUID.randomUUID(), Instant.now(), getId(), reservationId.value(), amount));
     }
 
     public ReservationId getReservationId() {

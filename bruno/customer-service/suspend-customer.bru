@@ -1,0 +1,11 @@
+meta {
+  name: Suspend Customer
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{customerUrl}}/api/v1/customers/{{customerId}}/suspend
+  body: none
+  auth: none
+}

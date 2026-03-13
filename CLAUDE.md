@@ -133,3 +133,16 @@ mvn spring-boot:run
 ```
 
 JaCoCo is permanently active (no profile needed). Coverage thresholds: domain/common 80%, application 75%, infrastructure 60%. Container modules are excluded via `jacoco.skip`.
+
+## Bruno E2E Tests
+
+```bash
+# Install Bruno CLI
+npm install -g @usebruno/cli
+
+# Run E2E SAGA happy path (requires docker compose up -d)
+cd bruno/e2e
+bru run --env local
+```
+
+The `bruno/` folder contains API requests for all 4 services (manual exploration) and an `e2e/` subfolder with the SAGA happy path sequence (create customer, register vehicle, create reservation, verify CONFIRMED).

@@ -1,0 +1,11 @@
+meta {
+  name: Track Reservation
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{reservationUrl}}/api/v1/reservations/{{trackingId}}
+  body: none
+  auth: none
+}

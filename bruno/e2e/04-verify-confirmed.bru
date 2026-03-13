@@ -1,0 +1,23 @@
+meta {
+  name: 04 Verify Confirmed
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{reservationUrl}}/api/v1/reservations/{{trackingId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.status: eq CONFIRMED
+}
+
+script:pre-request {
+  // Give SAGA time to complete (PENDING → CONFIRMED).
+  // Bruno CLI ignores pre-request scripts, but in the UI this provides a delay.
+  // In practice, the SAGA completes in ~2s so this is not needed for CLI runs.
+  await new Promise(r => setTimeout(r, 5000));
+}

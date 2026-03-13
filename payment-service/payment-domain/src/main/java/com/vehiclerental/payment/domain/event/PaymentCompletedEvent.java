@@ -5,7 +5,6 @@ import com.vehiclerental.common.domain.vo.Money;
 import com.vehiclerental.payment.domain.exception.PaymentDomainException;
 import com.vehiclerental.payment.domain.model.vo.CustomerId;
 import com.vehiclerental.payment.domain.model.vo.PaymentId;
-import com.vehiclerental.payment.domain.model.vo.ReservationId;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -14,7 +13,7 @@ public record PaymentCompletedEvent(
         UUID eventId,
         Instant occurredOn,
         PaymentId paymentId,
-        ReservationId reservationId,
+        UUID reservationId,
         CustomerId customerId,
         Money amount
 ) implements DomainEvent {

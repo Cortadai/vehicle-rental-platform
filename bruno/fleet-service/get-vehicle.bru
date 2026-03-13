@@ -1,0 +1,11 @@
+meta {
+  name: Get Vehicle
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{fleetUrl}}/api/v1/vehicles/{{vehicleId}}
+  body: none
+  auth: none
+}
