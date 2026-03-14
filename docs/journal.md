@@ -2783,3 +2783,60 @@ Con el E2E validando el happy path SAGA completo, los posibles siguientes pasos 
 - **Idempotencia de listeners** — evitar procesar el mismo mensaje dos veces
 - **Monitoring/observability** — MDC + tracing distribuido
 - **E2E de compensation flow** — validar que la SAGA compensa correctamente cuando falla un paso
+
+---
+
+## Ciclo #26: database-indexes (2026-03-14)
+
+### Que se hizo
+
+Migraciones Flyway con indices de base de datos para columnas de filtrado frecuente en 3 de los 4 servicios. Tambien se evaluo y resolvio la deuda tecnica pendiente: tests de ApiResponse/ApiMetadata, limpieza de MapStruct del POM, y decisiones arquitectonicas sobre timeout/retry e idempotencia.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `reservation-container/.../V4__create_indexes.sql` | `idx_reservations_customer_id`, `idx_reservations_status` |
+| `payment-container/.../V3__create_indexes.sql` | `idx_payments_status` |
+| `fleet-container/.../V3__create_indexes.sql` | `idx_vehicles_status` |
+| `common/src/test/.../ApiMetadataTest.java` | 5 tests: factory method, null timestamp, null requestId, blank requestId, valid construction |
+| `common/src/test/.../ApiResponseTest.java` | 2 tests: factory method wraps data, accepts null data |
+| `pom.xml` | Eliminados: `mapstruct.version`, `lombok-mapstruct-binding.version`, MapStruct en dependencyManagement, mapstruct-processor y compiler args del compiler plugin |
+| `docs/roadmap-to-saga.md` | 3 decisiones nuevas en Decision Log + items cerrados |
+
+### Decisiones arquitectonicas documentadas
+
+#### 1. Customer service excluido de indices
+El UNIQUE constraint en `email` ya crea indice implicito en PostgreSQL. `status` tiene cardinalidad tan baja (ACTIVE/SUSPENDED) que un indice no aporta con volumen minimo. Mejor documentar por que NO se anade.
+
+#### 2. MapStruct eliminado del POM
+Estaba declarado en properties (2 versiones), dependencyManagement (2 artifacts), y compiler plugin (processor + binding + 2 compiler args) pero **ningun fichero Java lo importaba**. Peso muerto de 20+ lineas XML eliminado tras decidir mantener mappers manuales.
+
+#### 3. SAGA timeout/retry e idempotencia diferidos
+El POC demuestra los patrones arquitectonicos (orchestration, compensation, outbox). Timeout/retry e idempotencia son concerns operacionales que anaden complejidad sin aportar al objetivo de aprendizaje. En produccion: scheduled job que detecte SAGAs stuck > N minutos, y deduplicacion por messageId en listeners.
+
+#### 4. starter-test se queda en parent `<dependencies>`
+Evaluado mover a `<dependencyManagement>` pero el coste (13 POMs modificados) supera el beneficio. ArchUnit ya protege la boundary domain-sin-Spring. `<scope>test</scope>` no contamina el classpath de produccion.
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Indices en BD (excl. PK/UNIQUE) | 3 (outbox, tracking_id, saga_state) | 7 (+4 nuevos) |
+| Tests en common | 31 | 38 (+7 ApiResponse/ApiMetadata) |
+| Lineas XML de MapStruct en POM | ~20 | 0 |
+| Items pendientes en roadmap | 10 | 4 |
+
+### Lecciones aprendidas
+
+- **UNIQUE constraints en PostgreSQL crean indices implicitos**: No necesitas `CREATE INDEX` adicional para columnas con UNIQUE. `customers.email` y `vehicles.license_plate` ya estan indexados.
+- **Limpiar dependencias no usadas es tan importante como no anadirlas**: MapStruct llevaba 26 changes en el POM sin que ningun fichero Java lo usara. La decision de mappers manuales debio haber venido acompanada de la limpieza.
+- **Documentar decisiones de "no hacer" tiene tanto valor como documentar lo que se hace**: Los 4 items diferidos/descartados (MapStruct, starter-test, timeout/retry, idempotencia) quedan en el Decision Log con rationale. Futuros contribuidores saben que fue una decision consciente, no un olvido.
+- **IF NOT EXISTS en migraciones Flyway es buena practica**: Aunque Flyway trackea versiones y no re-ejecuta, la idempotencia protege contra edge cases de entornos parcialmente migrados.
+
+### Siguiente paso
+
+Con la mayoria de la deuda tecnica resuelta, los posibles siguientes pasos son:
+- **MDC/correlationId propagation** — tracing distribuido
+- **OpenAPI documentation** — specs generadas desde los controllers
+- **E2E de compensation flow** — validar SAGA compensation en Bruno

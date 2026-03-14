@@ -11,6 +11,8 @@
 | @JsonValue en typed IDs | No cambiar (funcional, decision diferida) — `{"value":"uuid"}` en payloads |
 | Mappers manuales (no MapStruct) | Prioridad en claridad y aprendizaje sobre reduccion de boilerplate. 9 mappers (426 LOC) — los complejos (Reservation/Payment persistence) usan ObjectMapper, MapStruct necesitaria @AfterMapping igualmente verboso. MapStruct recomendado para proyectos de produccion |
 | starter-test en parent `<dependencies>` | Se evaluo mover a `<dependencyManagement>` pero el coste (13 POMs modificados) supera el beneficio. ArchUnit ya protege la boundary domain-sin-Spring. `<scope>test</scope>` no contamina el classpath de produccion |
+| MapStruct eliminado del POM | Estaba declarado en properties, dependencyManagement y compiler plugin pero ningun fichero Java lo importaba. Limpiado como peso muerto tras decidir mantener mappers manuales |
+| SAGA timeout/retry e idempotencia diferidos | El POC demuestra los patrones arquitectonicos (orchestration, compensation, outbox). Timeout/retry e idempotencia son concerns operacionales que anaden complejidad sin aportar al objetivo de aprendizaje. En produccion: scheduled job que detecte SAGAs stuck > N minutos, y deduplicacion por messageId en listeners |
 
 ---
 
@@ -89,17 +91,17 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 
 ## Post-SAGA (changes dedicados)
 
-- [ ] SAGA timeout/retry handling (que pasa si un participante no responde?)
-- [ ] Idempotencia de listeners (evitar procesar el mismo mensaje dos veces)
+- [x] SAGA timeout/retry handling — DIFERIDO (ver Decision Log)
+- [x] Idempotencia de listeners — DIFERIDO (ver Decision Log)
 - [ ] MDC/correlationId propagation (tracing distribuido)
 - [x] Docker Compose con 4 servicios — Paketo images, Actuator health, Spring Boot 3.4.13 (change #24)
 - [x] Bruno E2E tests — coleccion Bruno + happy path SAGA validado + bugfix serializacion payment events (change #25)
 - [x] Mover spring-boot-starter-test a dependencyManagement — DESCARTADO (ver Decision Log)
 - [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
-- [ ] Indices en BD (status, email, category)
+- [x] Indices en BD — migraciones Flyway V3/V4 en fleet, payment, reservation (change #26)
 - [ ] OpenAPI documentation
 - [ ] README para developers
-- [x] Evaluar MapStruct vs mappers manuales — DESCARTADO (ver Decision Log)
+- [x] Evaluar MapStruct vs mappers manuales — DESCARTADO, MapStruct eliminado del POM (ver Decision Log)
 - [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
 - [x] Tests para ApiMetadata/ApiResponse en common (7 tests directos)
 - [ ] E2E de compensation flow (validar que la SAGA compensa correctamente)

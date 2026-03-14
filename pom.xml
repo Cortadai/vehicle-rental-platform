@@ -65,8 +65,6 @@
         <vehicle-rental.version>1.0.0-SNAPSHOT</vehicle-rental.version>
 
         <!-- External dependency versions (not managed by Spring Boot) -->
-        <mapstruct.version>1.5.5.Final</mapstruct.version>
-        <lombok-mapstruct-binding.version>0.2.0</lombok-mapstruct-binding.version>
         <springdoc.version>2.3.0</springdoc.version>
         <archunit.version>1.2.1</archunit.version>
         <jacoco.version>0.8.12</jacoco.version>
@@ -168,18 +166,6 @@
                 <version>${vehicle-rental.version}</version>
             </dependency>
 
-            <!-- MapStruct -->
-            <dependency>
-                <groupId>org.mapstruct</groupId>
-                <artifactId>mapstruct</artifactId>
-                <version>${mapstruct.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.mapstruct</groupId>
-                <artifactId>mapstruct-processor</artifactId>
-                <version>${mapstruct.version}</version>
-            </dependency>
-
             <!-- OpenAPI / SpringDoc -->
             <dependency>
                 <groupId>org.springdoc</groupId>
@@ -218,7 +204,7 @@
         <!-- ========== PLUGIN MANAGEMENT ========== -->
         <pluginManagement>
             <plugins>
-                <!-- 6.1: Compiler with -parameters and Lombok + MapStruct processors -->
+                <!-- 6.1: Compiler with -parameters and Lombok processor -->
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
@@ -230,21 +216,7 @@
                                 <artifactId>lombok</artifactId>
                                 <version>${lombok.version}</version>
                             </path>
-                            <path>
-                                <groupId>org.projectlombok</groupId>
-                                <artifactId>lombok-mapstruct-binding</artifactId>
-                                <version>${lombok-mapstruct-binding.version}</version>
-                            </path>
-                            <path>
-                                <groupId>org.mapstruct</groupId>
-                                <artifactId>mapstruct-processor</artifactId>
-                                <version>${mapstruct.version}</version>
-                            </path>
                         </annotationProcessorPaths>
-                        <compilerArgs>
-                            <arg>-Amapstruct.defaultComponentModel=spring</arg>
-                            <arg>-Amapstruct.unmappedTargetPolicy=ERROR</arg>
-                        </compilerArgs>
                     </configuration>
                 </plugin>
 

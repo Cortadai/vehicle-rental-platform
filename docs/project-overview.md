@@ -73,7 +73,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 25 changes completados — SAGA Orchestration + Quality Gates + E2E
+ 26 changes completados — SAGA Orchestration + Quality Gates + E2E
  ================================================================
 
   #1  parent-pom-multi-module          }
@@ -105,6 +105,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #23 archunit-architecture-tests      }  Quality Gate
   #24 docker-compose-services          }  Infrastructure
   #25 bruno-e2e-tests                  }  E2E Testing + bugfix payment events
+  #26 database-indexes                 }  Flyway indexes for frequent filters
 ```
 
 ## Flujo SAGA End-to-End
@@ -289,18 +290,24 @@ Cobertura por capa (lineas):
   COMPLETADO                          PENDIENTE
   ==========                          =========
 
-  [x] 4 servicios hexagonales         [ ] SAGA timeout / retry
-  [x] 4 capas por servicio            [ ] Idempotencia de listeners
-  [x] Outbox en 4 servicios           [ ] MDC / Correlation ID
-  [x] Topologia RabbitMQ completa     [ ] OpenAPI docs
-  [x] 12 @RabbitListeners             [ ] E2E compensation flow
+  COMPLETADO                          PENDIENTE
+  ==========                          =========
+
+  [x] 4 servicios hexagonales         [ ] MDC / Correlation ID
+  [x] 4 capas por servicio            [ ] OpenAPI docs
+  [x] Outbox en 4 servicios           [ ] E2E compensation flow
+  [x] Topologia RabbitMQ completa
+  [x] 12 @RabbitListeners
   [x] SAGA Orchestrator
   [x] Compensation flows
-  [x] 500 tests pasando
+  [x] 507 tests pasando
   [x] JaCoCo permanente (80/75/60%)
   [x] ArchUnit hexagonal boundaries
   [x] Docker Compose (4 servicios)
   [x] Bruno E2E happy path SAGA
+  [x] Database indexes (Flyway)
+  [x] SAGA timeout/retry (diferido)
+  [x] Idempotencia listeners (diferido)
 ```
 
 ## Stack Tecnologico
