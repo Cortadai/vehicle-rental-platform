@@ -2966,3 +2966,81 @@ Los controllers viven en `*-infrastructure`, no en `*-container`. El starter com
 Con Swagger UI, E2E y la mayoria de items cerrados, los unicos pendientes son:
 - **MDC/correlationId propagation** — tracing distribuido
 - **README para developers** — guia de onboarding
+
+---
+
+## Ciclo #29: observability-infrastructure (2026-03-14)
+
+### Que se hizo
+
+Stack de observabilidad Grafana completo (LGTM) desplegable con Docker Compose. Grafana + Loki + Tempo + Prometheus + Alloy como infraestructura base para el tracing distribuido y la centralizacion de logs y metricas de los 4 microservicios. Grafana provisionado automaticamente con datasources y dashboard JVM Micrometer. Tambien se creo el documento de buenas practicas `docs/20-observabilidad-spring-boot.md`.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `docker/tempo/tempo.yml` | Receptor OTLP (gRPC + HTTP) + storage local. Pinned a v2.7.2 |
+| `docker/loki/loki.yml` | Schema TSDB v13 + filesystem storage + structured metadata |
+| `docker/prometheus/prometheus.yml` | 4 scrape configs para `/actuator/prometheus` de los 4 servicios |
+| `docker/alloy/config.alloy` | Docker log collection (socket → Loki) + OTLP trace relay (→ Tempo) |
+| `docker/grafana/provisioning/datasources/datasources.yml` | 3 datasources: Prometheus (default), Loki, Tempo |
+| `docker/grafana/provisioning/dashboards/dashboards.yml` | Dashboard provider apuntando a `/var/lib/grafana/dashboards` |
+| `docker/grafana/dashboards/jvm-micrometer.json` | Dashboard ID 4701 con datasource UID corregido |
+| `docker-compose.yml` | 5 nuevos servicios: grafana, loki, tempo, prometheus, alloy |
+| `docs/20-observabilidad-spring-boot.md` | Doc de buenas practicas: 13 secciones con MDC, Micrometer, Grafana, Alloy |
+| `CLAUDE.md` | Referencia al doc 20 en la lista de best practices |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Contenedores en compose | 6 | 11 (+5 observabilidad) |
+| Observabilidad | Cero | Stack completo (logs, traces, metricas) |
+| Grafana datasources | N/A | 3 provisionados automaticamente |
+| Dashboards | N/A | 1 (JVM Micrometer, pre-importado) |
+| Docs de buenas practicas | 20 | 21 (+observabilidad) |
+| Puertos nuevos | 0 | 5 (3000, 3100, 3200, 9090, 12345) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Tempo 2.7.2 en vez de latest
+
+Tempo `latest` (3.x) cambio su arquitectura interna para usar Kafka como cola entre distributor e ingester por defecto. Sin un cluster Kafka configurado, Tempo 3.x no arranca (`the Kafka topic has not been configured`). Tempo 2.7.2 usa push directo al ingester — perfecto para un POC local sin infraestructura adicional.
+
+```
+Tempo 2.x:  traces → distributor → push directo → ingester → storage
+Tempo 3.x:  traces → distributor → Kafka → ingester → storage (default)
+```
+
+Este Kafka es interno de Tempo, no tiene nada que ver con RabbitMQ del proyecto.
+
+#### 2. Dashboard datasource UID para provisioning
+
+Los dashboards descargados de Grafana.com usan `${DS_PROMETHEUS}` como variable de template con un bloque `__inputs` que mapea la variable al datasource. Esto funciona al importar manualmente pero **no con provisioning automatico** — Grafana no resuelve `__inputs` en dashboards provisionados. La solucion: reemplazar `${DS_PROMETHEUS}` por el nombre literal `Prometheus` (coincidiendo con el datasource provisionado), eliminar `__inputs`/`__requires`, y poner `id: null`.
+
+#### 3. Alloy como intermediario completo
+
+Alloy recoge logs via Docker socket (`loki.source.docker`) y tambien actua como receptor OTLP para traces (reenvio a Tempo). Los servicios no conocen Loki ni Tempo directamente — solo hablan con Alloy. Es el patron de produccion: desacoplar instrumentacion del destino.
+
+#### 4. Docker socket mount en Windows
+
+En Docker Desktop para Windows, el socket se monta como `//var/run/docker.sock:/var/run/docker.sock` (doble barra) en el docker-compose.yml. Alloy necesita acceso al socket para descubrir contenedores y recoger sus logs.
+
+#### 5. Grafana anonymous admin access
+
+Para un POC local, Grafana se configura con `GF_AUTH_ANONYMOUS_ENABLED=true` y `GF_AUTH_ANONYMOUS_ORG_ROLE=Admin`. Cualquiera que acceda a `:3000` tiene acceso admin sin login. En produccion esto seria inaceptable, pero para desarrollo elimina la friccion.
+
+### Lecciones aprendidas
+
+- **Los dashboards de Grafana.com no son plug-and-play con provisioning**: El mecanismo `__inputs` + `${DS_*}` esta disenado para import manual, no para ficheros provisionados. Siempre hay que post-procesar el JSON.
+- **Tempo `latest` puede romper con breaking changes de arquitectura**: Las imagenes `latest` de componentes Grafana pueden cambiar drasticamente entre majors (2.x → 3.x requiere Kafka). Para infraestructura de observabilidad, pinear versiones es mas seguro que para librerias Java donde el BOM protege.
+- **Loki y Tempo tienen un warmup de ~15s**: Los ingesters necesitan tiempo para estar "ready". Los healthchecks devuelven "Ingester not ready: waiting for 15s" durante el arranque. Esto es normal y esperado — no indica un error.
+- **Alloy usa su propio DSL (.alloy), no YAML**: Diferente a todo lo demas en el stack (Prometheus, Loki, Tempo, Grafana usan YAML). La sintaxis es similar a HCL de Terraform: bloques con tipo + nombre + cuerpo.
+- **El stack completo de observabilidad anade ~2GB de RAM**: Con 11 contenedores, la plataforma necesita una maquina con al menos 8GB. En maquinas con 4GB los contenedores compiten por memoria.
+
+### Siguiente paso
+
+La infraestructura de observabilidad esta lista. El siguiente change (`observability-instrumentation`) instrumentara los 4 servicios:
+- Dependencias Maven (micrometer-tracing-bridge-otel, opentelemetry-exporter-otlp, micrometer-registry-prometheus)
+- application.yml (tracing, OTLP endpoint, actuator prometheus, logging correlation)
+- Verificacion: traces en Tempo, logs en Loki, metricas en Prometheus — todo visible en Grafana

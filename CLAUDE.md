@@ -17,7 +17,7 @@ This is a learning POC implementing enterprise microservice patterns. The primar
 
 ### Best Practice Documents
 
-The `docs/` folder contains 20 detailed best practice documents with code examples, checklists, and anti-patterns. **Always consult** the relevant document before generating code for a specific area. Key documents:
+The `docs/` folder contains 21 detailed best practice documents with code examples, checklists, and anti-patterns. **Always consult** the relevant document before generating code for a specific area. Key documents:
 
 - **Hexagonal structure**: `docs/17-arquitectura-hexagonal-ddd-tactico.md` (includes full implementation checklist)
 - **Package layout**: `docs/02-organizacion-paquetes-enterprise.md`
@@ -27,6 +27,7 @@ The `docs/` folder contains 20 detailed best practice documents with code exampl
 - **Testing strategy**: `docs/04-testing-estrategia-completa.md`
 - **REST APIs**: `docs/08-apis-rest-best-practices.md`
 - **Code conventions**: `docs/05-convenciones-codigo-java-spring.md`
+- **Observability**: `docs/20-observabilidad-spring-boot.md` (Micrometer Tracing, Grafana LGTM stack, Alloy, MDC)
 
 ### OpenSpec Workflow
 

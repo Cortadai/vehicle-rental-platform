@@ -1,0 +1,67 @@
+// ==================== Docker Log Collection ====================
+
+// Discover all Docker containers
+discovery.docker "containers" {
+    host = "unix:///var/run/docker.sock"
+}
+
+// Extract container name as label
+discovery.relabel "containers" {
+    targets = discovery.docker.containers.targets
+
+    rule {
+        source_labels = ["__meta_docker_container_name"]
+        regex         = "/(.*)"
+        target_label  = "container"
+    }
+}
+
+// Collect logs from Docker containers
+loki.source.docker "logs" {
+    host       = "unix:///var/run/docker.sock"
+    targets    = discovery.relabel.containers.output
+    forward_to = [loki.process.process.receiver]
+}
+
+// Process logs (parse Docker log format)
+loki.process "process" {
+    stage.docker {}
+    forward_to = [loki.write.loki.receiver]
+}
+
+// Send logs to Loki
+loki.write "loki" {
+    endpoint {
+        url = "http://loki:3100/loki/api/v1/push"
+    }
+}
+
+// ==================== OTLP Trace Relay ====================
+
+// Receive OTLP traces from Spring Boot services
+otelcol.receiver.otlp "traces" {
+    grpc {
+        endpoint = "0.0.0.0:4317"
+    }
+    http {
+        endpoint = "0.0.0.0:4318"
+    }
+
+    output {
+        traces = [otelcol.processor.batch.default.input]
+    }
+}
+
+// Batch traces for efficiency
+otelcol.processor.batch "default" {
+    output {
+        traces = [otelcol.exporter.otlphttp.tempo.input]
+    }
+}
+
+// Export traces to Tempo
+otelcol.exporter.otlphttp "tempo" {
+    client {
+        endpoint = "http://tempo:4318"
+    }
+}
