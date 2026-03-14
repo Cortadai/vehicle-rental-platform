@@ -44,7 +44,8 @@ class OutboxPublisherIT {
                 "CustomerValidatedEvent",
                 payload,
                 "customer.validated",
-                "customer.exchange"
+                "customer.exchange",
+                null
         );
         outboxEventRepository.save(outboxEvent);
 

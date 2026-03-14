@@ -52,11 +52,14 @@ public class OutboxEvent {
     @Column(name = "published_at")
     private Instant publishedAt;
 
+    @Column(name = "trace_parent", length = 256)
+    private String traceParent;
+
     protected OutboxEvent() {
     }
 
     private OutboxEvent(String aggregateType, String aggregateId, String eventType,
-                        String payload, String routingKey, String exchange) {
+                        String payload, String routingKey, String exchange, String traceParent) {
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
@@ -67,11 +70,13 @@ public class OutboxEvent {
         this.retryCount = 0;
         this.createdAt = Instant.now();
         this.publishedAt = null;
+        this.traceParent = traceParent;
     }
 
     public static OutboxEvent create(String aggregateType, String aggregateId, String eventType,
-                                     String payload, String routingKey, String exchange) {
-        return new OutboxEvent(aggregateType, aggregateId, eventType, payload, routingKey, exchange);
+                                     String payload, String routingKey, String exchange,
+                                     String traceParent) {
+        return new OutboxEvent(aggregateType, aggregateId, eventType, payload, routingKey, exchange, traceParent);
     }
 
     public Long getId() {
@@ -116,6 +121,10 @@ public class OutboxEvent {
 
     public Instant getPublishedAt() {
         return publishedAt;
+    }
+
+    public String getTraceParent() {
+        return traceParent;
     }
 
     public void markPublished() {

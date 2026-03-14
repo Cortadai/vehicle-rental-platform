@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.common.domain.event.DomainEvent;
 import com.vehiclerental.common.messaging.outbox.OutboxEvent;
 import com.vehiclerental.common.messaging.outbox.OutboxEventRepository;
+import com.vehiclerental.common.messaging.outbox.TraceContextHelper;
 import com.vehiclerental.payment.application.port.output.PaymentDomainEventPublisher;
 import com.vehiclerental.payment.domain.event.PaymentCompletedEvent;
 import com.vehiclerental.payment.domain.event.PaymentFailedEvent;
 import com.vehiclerental.payment.domain.event.PaymentRefundedEvent;
+import io.micrometer.tracing.Tracer;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -21,15 +23,19 @@ public class OutboxPaymentDomainEventPublisher implements PaymentDomainEventPubl
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
 
     public OutboxPaymentDomainEventPublisher(OutboxEventRepository outboxEventRepository,
-                                             ObjectMapper objectMapper) {
+                                             ObjectMapper objectMapper,
+                                             Tracer tracer) {
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.tracer = tracer;
     }
 
     @Override
     public void publish(List<DomainEvent> domainEvents) {
+        String traceParent = TraceContextHelper.currentTraceparent(tracer);
         for (DomainEvent event : domainEvents) {
             OutboxEvent outboxEvent = OutboxEvent.create(
                     AGGREGATE_TYPE,
@@ -37,7 +43,8 @@ public class OutboxPaymentDomainEventPublisher implements PaymentDomainEventPubl
                     event.getClass().getSimpleName(),
                     serializeEvent(event),
                     deriveRoutingKey(event),
-                    EXCHANGE
+                    EXCHANGE,
+                    traceParent
             );
             outboxEventRepository.save(outboxEvent);
         }

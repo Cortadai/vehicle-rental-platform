@@ -3115,3 +3115,57 @@ Se capturaron 6 screenshots en `docs/screenshots/`:
 ### Estado final del roadmap
 
 Con este change, **todos los items del roadmap Post-SAGA estan completados o diferidos conscientemente**. No quedan items pendientes.
+
+---
+
+## Ciclo #31: outbox-trace-propagation (2026-03-14)
+
+### Que se hizo
+
+Propagacion de trace context a traves del Outbox Pattern. El Outbox desacopla intencionalmente la escritura en BD del envio del mensaje (para consistencia), pero ese desacoplamiento rompia la continuidad del trace. La solucion: almacenar el `traceparent` (W3C Trace Context) en la tabla outbox_events durante la creacion del evento, y reinyectarlo en los headers del mensaje AMQP cuando el OutboxPublisher lo envia. Resultado: **el flujo SAGA completo (4 servicios, 7 spans) es ahora visible como un unico trace en Grafana Tempo**.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `V3-V5__add_trace_parent_to_outbox.sql` (×4) | `ALTER TABLE outbox_events ADD COLUMN trace_parent VARCHAR(256)` |
+| `common-messaging/pom.xml` | +micrometer-tracing (API) |
+| `OutboxEvent.java` | +campo traceParent, create() con 7mo parametro |
+| `TraceContextHelper.java` | Utility: `currentTraceparent(Tracer)` → W3C format |
+| `TraceContextHelperTest.java` | 4 tests unitarios |
+| `OutboxPublisher.java` | Inyecta header `traceparent` en el mensaje AMQP |
+| `OutboxPublisherTest.java` | Actualizado para 7 args + assertion de traceparent header |
+| 5 publishers (×4 servicios + SAGA) | Inyectan Tracer, pasan traceparent a OutboxEvent.create() |
+| 4 OutboxPublisherIT.java | Actualizado create() con 7mo arg null |
+| 4 application.yml | +`spring.rabbitmq.listener.simple.observation-enabled: true` |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Servicios en un trace SAGA | 1 (solo reservation) | 4 (reservation + customer + payment + fleet) |
+| Spans en trace SAGA | 1 | 7 |
+| Columnas en outbox_events | 11 | 12 (+trace_parent) |
+| Tests nuevos | 0 | 4 (TraceContextHelperTest) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Captura via Micrometer Tracer, no OpenTelemetry SDK
+
+Usar `io.micrometer.tracing.Tracer` (abstraccion) en vez de `io.opentelemetry.api.trace.Span.current()` (SDK directo). Si en el futuro se cambia de OTel a Brave, el codigo sigue funcionando.
+
+#### 2. observation-enabled: true — imprescindible y no documentado claramente
+
+Spring AMQP no extrae el header `traceparent` de los mensajes por defecto. Requiere `spring.rabbitmq.listener.simple.observation-enabled: true` en application.yml. Sin esto, cada listener crea un trace nuevo en vez de continuar el trace padre. Este setting no es obvio en la documentacion de Spring Boot — fue descubierto durante la verificacion cuando los traces seguian mostrando 1 servicio.
+
+#### 3. Campo nullable para backward compatibility
+
+`trace_parent VARCHAR(256) NULL` — los eventos creados en tests o schedulers sin trace context activo no fallan. El OutboxPublisher solo inyecta el header si el valor no es null.
+
+### Lecciones aprendidas
+
+- **El Outbox Pattern rompe el trace context por diseno**: El desacoplamiento temporal (request HTTP → 500ms → outbox scheduler) pierde el ThreadLocal donde vive el trace. Almacenar el traceparent en la tabla outbox es la solucion estandar pero no es automatica — requiere codigo manual.
+- **`observation-enabled: true` es el switch mas critico y menos documentado**: Spring AMQP tiene la capacidad de propagar traces, pero esta desactivada por defecto. Sin este flag, los `@RabbitListener` crean traces aislados incluso si el mensaje lleva el header `traceparent`.
+- **El trace de la SAGA es enormemente valioso para debugging**: Ver los 4 servicios en un waterfall de Tempo muestra exactamente donde esta el cuello de botella, que servicio tardo mas, y si la compensacion funciono. Es la visualizacion mas util del proyecto.
+- **JaCoCo como guardian de calidad funciona**: Al anadir `TraceContextHelper.java` sin tests, JaCoCo bloqueo el build hasta que se anadieron los 4 tests unitarios. El umbral del 80% en common-messaging forzo la cobertura.
+- **Los tests existentes se rompen con cambios de firma**: Cambiar `OutboxEvent.create()` de 6 a 7 parametros rompio 9 ficheros de test (5 unit + 4 IT). La columna nullable y el parametro null en tests facilitan la migracion.

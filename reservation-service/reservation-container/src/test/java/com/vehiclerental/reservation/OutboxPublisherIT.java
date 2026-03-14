@@ -44,7 +44,8 @@ class OutboxPublisherIT {
                 "ReservationCreatedEvent",
                 payload,
                 "reservation.created",
-                "reservation.exchange"
+                "reservation.exchange",
+                null
         );
         outboxEventRepository.save(outboxEvent);
 

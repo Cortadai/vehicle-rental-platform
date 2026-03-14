@@ -44,7 +44,8 @@ class OutboxPublisherIT {
                 "FleetConfirmedEvent",
                 payload,
                 "fleet.confirmed",
-                "fleet.exchange"
+                "fleet.exchange",
+                null
         );
         outboxEventRepository.save(outboxEvent);
 

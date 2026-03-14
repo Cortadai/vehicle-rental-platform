@@ -22,6 +22,7 @@ spring:
     password: ${RABBITMQ_PASSWORD:guest}
     listener:
       simple:
+        observation-enabled: true
         retry:
           enabled: true
           initial-interval: 1000

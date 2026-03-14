@@ -68,7 +68,7 @@ class OutboxPublisherTest {
     void successfulPublish_marksPublishedAndSaves() {
         OutboxEvent event = OutboxEvent.create(
                 "Reservation", "res-123", "ReservationCreatedEvent",
-                "{\"id\":\"res-123\"}", "reservation.created", "reservation.exchange");
+                "{\"id\":\"res-123\"}", "reservation.created", "reservation.exchange", null);
         when(outboxEventRepository.findTop100ByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING))
                 .thenReturn(List.of(event));
 
@@ -85,7 +85,7 @@ class OutboxPublisherTest {
     void sendFailure_incrementsRetryCountAndSaves() {
         OutboxEvent event = OutboxEvent.create(
                 "Payment", "pay-456", "PaymentCompletedEvent",
-                "{\"id\":\"pay-456\"}", "payment.completed", "payment.exchange");
+                "{\"id\":\"pay-456\"}", "payment.completed", "payment.exchange", null);
         when(outboxEventRepository.findTop100ByStatusOrderByCreatedAtAsc(OutboxStatus.PENDING))
                 .thenReturn(List.of(event));
         doThrow(new RuntimeException("Connection refused"))
@@ -103,7 +103,7 @@ class OutboxPublisherTest {
     void maxRetries_marksEventAsFailed() {
         OutboxEvent event = OutboxEvent.create(
                 "Payment", "pay-789", "PaymentFailedEvent",
-                "{\"id\":\"pay-789\"}", "payment.failed", "payment.exchange");
+                "{\"id\":\"pay-789\"}", "payment.failed", "payment.exchange", null);
         // Simulate 4 previous retries
         for (int i = 0; i < 4; i++) {
             event.incrementRetryCount();
@@ -125,7 +125,7 @@ class OutboxPublisherTest {
     void correctAmqpHeaders() {
         OutboxEvent event = OutboxEvent.create(
                 "Fleet", "fleet-001", "FleetConfirmedEvent",
-                "{\"vehicleId\":\"v-1\"}", "fleet.confirmed", "fleet.exchange");
+                "{\"vehicleId\":\"v-1\"}", "fleet.confirmed", "fleet.exchange", "00-abc123-def456-01");
         // Use reflection to set ID since it's normally assigned by JPA
         try {
             var idField = OutboxEvent.class.getDeclaredField("id");
@@ -148,5 +148,6 @@ class OutboxPublisherTest {
         assertThat(message.getMessageProperties().getMessageId()).isEqualTo("42");
         assertThat(message.getMessageProperties().getContentType()).isEqualTo("application/json");
         assertThat(new String(message.getBody())).isEqualTo("{\"vehicleId\":\"v-1\"}");
+        assertThat((String) message.getMessageProperties().getHeader("traceparent")).isEqualTo("00-abc123-def456-01");
     }
 }

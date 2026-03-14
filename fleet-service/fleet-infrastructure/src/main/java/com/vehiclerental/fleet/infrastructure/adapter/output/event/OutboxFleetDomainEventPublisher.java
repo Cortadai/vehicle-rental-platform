@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.common.domain.event.DomainEvent;
 import com.vehiclerental.common.messaging.outbox.OutboxEvent;
 import com.vehiclerental.common.messaging.outbox.OutboxEventRepository;
+import com.vehiclerental.common.messaging.outbox.TraceContextHelper;
 import com.vehiclerental.fleet.application.port.output.FleetDomainEventPublisher;
 import com.vehiclerental.fleet.domain.event.*;
+import io.micrometer.tracing.Tracer;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -30,15 +32,19 @@ public class OutboxFleetDomainEventPublisher implements FleetDomainEventPublishe
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
 
     public OutboxFleetDomainEventPublisher(OutboxEventRepository outboxEventRepository,
-                                           ObjectMapper objectMapper) {
+                                           ObjectMapper objectMapper,
+                                           Tracer tracer) {
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.tracer = tracer;
     }
 
     @Override
     public void publish(List<DomainEvent> domainEvents) {
+        String traceParent = TraceContextHelper.currentTraceparent(tracer);
         for (DomainEvent event : domainEvents) {
             OutboxEvent outboxEvent = OutboxEvent.create(
                     AGGREGATE_TYPE,
@@ -46,7 +52,8 @@ public class OutboxFleetDomainEventPublisher implements FleetDomainEventPublishe
                     event.getClass().getSimpleName(),
                     serializeEvent(event),
                     deriveRoutingKey(event),
-                    EXCHANGE
+                    EXCHANGE,
+                    traceParent
             );
             outboxEventRepository.save(outboxEvent);
         }

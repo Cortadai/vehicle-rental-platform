@@ -42,13 +42,18 @@ public class OutboxPublisher {
 
     private void processEvent(OutboxEvent event) {
         try {
-            Message message = MessageBuilder
+            var messageBuilder = MessageBuilder
                     .withBody(event.getPayload().getBytes(StandardCharsets.UTF_8))
                     .setContentType(MessageProperties.CONTENT_TYPE_JSON)
                     .setHeader("X-Aggregate-Type", event.getAggregateType())
                     .setHeader("X-Aggregate-Id", event.getAggregateId())
-                    .setMessageId(String.valueOf(event.getId()))
-                    .build();
+                    .setMessageId(String.valueOf(event.getId()));
+
+            if (event.getTraceParent() != null) {
+                messageBuilder.setHeader("traceparent", event.getTraceParent());
+            }
+
+            Message message = messageBuilder.build();
 
             rabbitTemplate.send(event.getExchange(), event.getRoutingKey(), message);
 

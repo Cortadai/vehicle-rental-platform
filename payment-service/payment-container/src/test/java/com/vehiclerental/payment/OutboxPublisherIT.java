@@ -44,7 +44,8 @@ class OutboxPublisherIT {
                 "PaymentCompletedEvent",
                 payload,
                 "payment.completed",
-                "payment.exchange"
+                "payment.exchange",
+                null
         );
         outboxEventRepository.save(outboxEvent);
 

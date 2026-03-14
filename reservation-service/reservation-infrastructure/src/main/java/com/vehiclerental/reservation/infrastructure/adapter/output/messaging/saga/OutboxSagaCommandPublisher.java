@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vehiclerental.common.messaging.outbox.OutboxEvent;
 import com.vehiclerental.common.messaging.outbox.OutboxEventRepository;
+import com.vehiclerental.common.messaging.outbox.TraceContextHelper;
 import com.vehiclerental.reservation.application.port.output.SagaCommandPublisher;
+import io.micrometer.tracing.Tracer;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,11 +17,14 @@ public class OutboxSagaCommandPublisher implements SagaCommandPublisher {
 
     private final OutboxEventRepository outboxEventRepository;
     private final ObjectMapper objectMapper;
+    private final Tracer tracer;
 
     public OutboxSagaCommandPublisher(OutboxEventRepository outboxEventRepository,
-                                      ObjectMapper objectMapper) {
+                                      ObjectMapper objectMapper,
+                                      Tracer tracer) {
         this.outboxEventRepository = outboxEventRepository;
         this.objectMapper = objectMapper;
+        this.tracer = tracer;
     }
 
     @Override
@@ -31,7 +36,8 @@ public class OutboxSagaCommandPublisher implements SagaCommandPublisher {
                 EVENT_TYPE,
                 payload,
                 routingKey,
-                exchange
+                exchange,
+                TraceContextHelper.currentTraceparent(tracer)
         );
         outboxEventRepository.save(outboxEvent);
     }
