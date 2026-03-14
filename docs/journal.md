@@ -2802,7 +2802,7 @@ Migraciones Flyway con indices de base de datos para columnas de filtrado frecue
 | `common/src/test/.../ApiMetadataTest.java` | 5 tests: factory method, null timestamp, null requestId, blank requestId, valid construction |
 | `common/src/test/.../ApiResponseTest.java` | 2 tests: factory method wraps data, accepts null data |
 | `pom.xml` | Eliminados: `mapstruct.version`, `lombok-mapstruct-binding.version`, MapStruct en dependencyManagement, mapstruct-processor y compiler args del compiler plugin |
-| `docs/roadmap-to-saga.md` | 3 decisiones nuevas en Decision Log + items cerrados |
+| `docs/roadmap.md` | 3 decisiones nuevas en Decision Log + items cerrados |
 
 ### Decisiones arquitectonicas documentadas
 

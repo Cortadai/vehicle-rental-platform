@@ -6,7 +6,7 @@
 
 [![Java 21](https://img.shields.io/badge/Java-21-orange)](#stack-tecnologico)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.13-green)](#stack-tecnologico)
-[![Tests](https://img.shields.io/badge/Tests-500+-blue)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-507-blue)](#testing)
 [![Coverage](https://img.shields.io/badge/JaCoCo-enforced-brightgreen)](#cobertura-de-codigo)
 
 ---
@@ -20,6 +20,8 @@
 - [Flujo de Orquestacion SAGA](#flujo-de-orquestacion-saga)
 - [Patron Outbox](#patron-outbox)
 - [Referencia de APIs](#referencia-de-apis)
+- [Swagger UI](#swagger-ui)
+- [Tests E2E con Bruno](#tests-e2e-con-bruno)
 - [Primeros Pasos](#primeros-pasos)
 - [Ejecucion con Docker Compose](#ejecucion-con-docker-compose)
 - [Ejecucion Local (sin Docker)](#ejecucion-local-sin-docker)
@@ -136,7 +138,8 @@ Las dependencias siempre apuntan **hacia adentro**: `container -> infrastructure
 | RabbitMQ | 3.13 | Broker de mensajeria + UI de gestion |
 | Flyway | gestionado por Boot | Migraciones de base de datos |
 | Lombok | gestionado por Boot | Reduccion de boilerplate |
-| MapStruct | 1.5.5 | Mapeo DTO-Entidad |
+| SpringDoc OpenAPI | 2.3.0 | Swagger UI + documentacion OpenAPI |
+| Bruno CLI | — | Tests E2E contra Docker Compose |
 | Docker Compose | — | Orquestacion local |
 | Paketo Buildpacks | — | Generacion de imagenes OCI (sin Dockerfiles) |
 | JUnit 5 + Mockito + AssertJ | gestionado por Boot | Testing |
@@ -199,14 +202,19 @@ vehicle-rental-platform/
 │       ├── definitions.json           # Exchanges, colas, bindings, DLQs
 │       └── rabbitmq.conf
 │
+├── bruno/                             # Coleccion Bruno (API testing)
+│   ├── e2e/happy-path/               #   E2E happy path SAGA
+│   ├── e2e/compensation/             #   E2E compensation flow
+│   └── {service}/                    #   Requests por servicio (exploracion manual)
+│
 ├── docs/                              # 20 documentos de buenas practicas
-│   ├── journal.md                     #   Diario de aprendizaje (24 ciclos)
-│   └── roadmap-to-saga.md            #   Hoja de ruta de implementacion
+│   ├── journal.md                     #   Diario de aprendizaje (28 ciclos)
+│   └── roadmap.md                    #   Hoja de ruta y registro de decisiones
 │
 └── openspec/                          # Artefactos de Spec-Driven Development
     ├── project.md                     #   Vision general de arquitectura
-    ├── specs/                         #   Fuente de verdad (70+ specs)
-    └── changes/archive/              #   Changes completados (24 archivados)
+    ├── specs/                         #   Fuente de verdad (80+ specs)
+    └── changes/archive/              #   Changes completados (28 archivados)
 ```
 
 ---
@@ -389,6 +397,46 @@ graph LR
 
 ---
 
+## Swagger UI
+
+Cada servicio expone documentacion OpenAPI interactiva con Swagger UI (springdoc-openapi, zero configuracion):
+
+| Servicio | Swagger UI | API Docs (JSON) |
+|----------|-----------|-----------------|
+| Customer | http://localhost:8181/swagger-ui.html | http://localhost:8181/v3/api-docs |
+| Fleet | http://localhost:8182/swagger-ui.html | http://localhost:8182/v3/api-docs |
+| Reservation | http://localhost:8183/swagger-ui.html | http://localhost:8183/v3/api-docs |
+| Payment | http://localhost:8184/swagger-ui.html | http://localhost:8184/v3/api-docs |
+
+Los DTOs se documentan automaticamente por introspeccion de Java records — sin anotaciones `@Schema`.
+
+---
+
+## Tests E2E con Bruno
+
+La carpeta [`bruno/`](bruno/README.md) contiene una coleccion [Bruno](https://www.usebruno.com/) versionable en Git con requests para los 4 servicios y dos flujos E2E automatizados:
+
+```bash
+# Instalar Bruno CLI
+npm install -g @usebruno/cli
+
+# Happy path — SAGA completa exitosamente (PENDING → CONFIRMED)
+cd bruno
+bru run --env local e2e/happy-path
+
+# Compensation flow — fleet rechaza, payment se revierte (→ CANCELLED)
+bru run --env local e2e/compensation
+```
+
+| Flujo | Requests | Assertions | Que valida |
+|-------|----------|------------|-----------|
+| `e2e/happy-path` | 4 | 6 | Customer → Vehicle → Reservation → CONFIRMED |
+| `e2e/compensation` | 5 | 7 + 1 test | Customer → Vehicle → Maintenance → Reservation → CANCELLED + failureMessages |
+
+Mas detalles en [`bruno/README.md`](bruno/README.md).
+
+---
+
 ## Primeros Pasos
 
 ### Prerrequisitos
@@ -456,6 +504,10 @@ Util cuando se ejecutan los servicios en local con `mvn spring-boot:run`.
 | UI | URL | Credenciales |
 |----|-----|--------------|
 | RabbitMQ Management | http://localhost:15672 | guest / guest |
+| Swagger UI (Customer) | http://localhost:8181/swagger-ui.html | — |
+| Swagger UI (Fleet) | http://localhost:8182/swagger-ui.html | — |
+| Swagger UI (Reservation) | http://localhost:8183/swagger-ui.html | — |
+| Swagger UI (Payment) | http://localhost:8184/swagger-ui.html | — |
 
 ### Operaciones con Contenedores
 
@@ -516,7 +568,7 @@ La piramide de tests esta adaptada para arquitectura hexagonal + SAGA:
 
 ```mermaid
 graph TB
-    subgraph "Piramide de Tests (500+ tests)"
+    subgraph "Piramide de Tests (507 tests)"
         SAGA["Tests de Flujo SAGA (15%)<br/><small>Testcontainers + Awaitility<br/>Flujos asincronos multi-paso</small>"]
         INFRA["Tests de Infraestructura (30%)<br/><small>Testcontainers (PostgreSQL + RabbitMQ)<br/>JPA, REST, Mensajeria</small>"]
         APP["Tests de Aplicacion (15%)<br/><small>Mockito BDD<br/>Orquestacion de casos de uso</small>"]
@@ -740,17 +792,18 @@ graph LR
     style ARCHIVE fill:#f3e5f5
 ```
 
-Se han completado y archivado **24 changes**, desde la configuracion inicial del multi-modulo Maven hasta la orquestacion SAGA completa y la integracion con Docker Compose.
+Se han completado y archivado **28 changes**, desde la configuracion inicial del multi-modulo Maven hasta la orquestacion SAGA completa, tests E2E y documentacion OpenAPI.
 
-### Documentos Clave
+### Documentacion del Proyecto
 
 | Documento | Proposito |
 |----------|---------|
-| `docs/journal.md` | Diario de aprendizaje con 24 ciclos de decisiones y lecciones aprendidas |
-| `docs/roadmap-to-saga.md` | Hoja de ruta de implementacion y registro de decisiones |
-| `openspec/project.md` | Vision general de arquitectura y convenciones |
-| `openspec/specs/` | 70+ especificaciones (fuente de verdad) |
-| `docs/*.md` | 20 guias de buenas practicas con ejemplos de codigo y checklists |
+| [`bruno/README.md`](bruno/README.md) | Guia de la coleccion Bruno: estructura, E2E happy path y compensation |
+| [`docs/journal.md`](docs/journal.md) | Diario de aprendizaje con 28 ciclos de decisiones y lecciones aprendidas |
+| [`docs/roadmap.md`](docs/roadmap.md) | Registro de decisiones arquitectonicas y hoja de ruta |
+| [`docs/*.md`](docs/) | 20 guias de buenas practicas con ejemplos de codigo y checklists |
+| [`openspec/project.md`](openspec/project.md) | Vision general de arquitectura y convenciones |
+| [`openspec/specs/`](openspec/specs/) | 80+ especificaciones (fuente de verdad) |
 
 ---
 

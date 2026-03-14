@@ -101,7 +101,7 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
 - [x] Indices en BD — migraciones Flyway V3/V4 en fleet, payment, reservation (change #26)
 - [x] OpenAPI documentation — springdoc-openapi + Swagger UI en 4 servicios, sin @Schema (change #28)
-- [ ] README para developers
+- [x] README para developers — actualizado con Swagger UI, Bruno E2E, eliminado project-overview.md redundante
 - [x] Evaluar MapStruct vs mappers manuales — DESCARTADO, MapStruct eliminado del POM (ver Decision Log)
 - [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
 - [x] Tests para ApiMetadata/ApiResponse en common (7 tests directos)
