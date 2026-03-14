@@ -9,6 +9,8 @@
 | failureMessages: JSON unificado | Patron Payment con ObjectMapper — robusto ante comas en mensajes |
 | Logging/MDC | Implementar durante SAGA, no durante messaging — evitar cambios prematuros |
 | @JsonValue en typed IDs | No cambiar (funcional, decision diferida) — `{"value":"uuid"}` en payloads |
+| Mappers manuales (no MapStruct) | Prioridad en claridad y aprendizaje sobre reduccion de boilerplate. 9 mappers (426 LOC) — los complejos (Reservation/Payment persistence) usan ObjectMapper, MapStruct necesitaria @AfterMapping igualmente verboso. MapStruct recomendado para proyectos de produccion |
+| starter-test en parent `<dependencies>` | Se evaluo mover a `<dependencyManagement>` pero el coste (13 POMs modificados) supera el beneficio. ArchUnit ya protege la boundary domain-sin-Spring. `<scope>test</scope>` no contamina el classpath de produccion |
 
 ---
 
@@ -92,12 +94,12 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [ ] MDC/correlationId propagation (tracing distribuido)
 - [x] Docker Compose con 4 servicios — Paketo images, Actuator health, Spring Boot 3.4.13 (change #24)
 - [x] Bruno E2E tests — coleccion Bruno + happy path SAGA validado + bugfix serializacion payment events (change #25)
-- [ ] Mover spring-boot-starter-test a dependencyManagement (domain zero-Spring)
+- [x] Mover spring-boot-starter-test a dependencyManagement — DESCARTADO (ver Decision Log)
 - [x] ArchUnit tests para boundaries hexagonales (change #23 — domain purity, application isolation, dependency flow)
 - [ ] Indices en BD (status, email, category)
 - [ ] OpenAPI documentation
 - [ ] README para developers
-- [ ] Evaluar MapStruct vs mappers manuales
+- [x] Evaluar MapStruct vs mappers manuales — DESCARTADO (ver Decision Log)
 - [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
-- [ ] Tests para ApiMetadata/ApiResponse en common
+- [x] Tests para ApiMetadata/ApiResponse en common (7 tests directos)
 - [ ] E2E de compensation flow (validar que la SAGA compensa correctamente)
