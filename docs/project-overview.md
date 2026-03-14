@@ -73,7 +73,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 27 changes completados — SAGA Orchestration + Quality Gates + E2E
+ 28 changes completados — SAGA Orchestration + Quality Gates + E2E
  ================================================================
 
   #1  parent-pom-multi-module          }
@@ -107,6 +107,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #25 bruno-e2e-tests                  }  E2E Testing + bugfix payment events
   #26 database-indexes                 }  Flyway indexes for frequent filters
   #27 bruno-e2e-compensation           }  E2E compensation flow
+  #28 openapi-documentation            }  Swagger UI + springdoc-openapi
 ```
 
 ## Flujo SAGA End-to-End
@@ -291,12 +292,9 @@ Cobertura por capa (lineas):
   COMPLETADO                          PENDIENTE
   ==========                          =========
 
-  COMPLETADO                          PENDIENTE
-  ==========                          =========
-
   [x] 4 servicios hexagonales         [ ] MDC / Correlation ID
-  [x] 4 capas por servicio            [ ] OpenAPI docs
-  [x] Outbox en 4 servicios           [ ] E2E compensation flow
+  [x] 4 capas por servicio            [ ] README para developers
+  [x] Outbox en 4 servicios
   [x] Topologia RabbitMQ completa
   [x] 12 @RabbitListeners
   [x] SAGA Orchestrator
@@ -308,6 +306,7 @@ Cobertura por capa (lineas):
   [x] Bruno E2E happy path SAGA
   [x] Bruno E2E compensation flow
   [x] Database indexes (Flyway)
+  [x] OpenAPI / Swagger UI
   [x] SAGA timeout/retry (diferido)
   [x] Idempotencia listeners (diferido)
 ```
@@ -321,4 +320,5 @@ Cobertura por capa (lineas):
   JUnit 5 | Mockito | Testcontainers | Awaitility
   JaCoCo 0.8.12 (permanente, check con umbrales) | Lombok
   ArchUnit | Bruno CLI (E2E) | Docker Compose (Paketo images)
+  SpringDoc OpenAPI 2.3.0 (Swagger UI)
 ```

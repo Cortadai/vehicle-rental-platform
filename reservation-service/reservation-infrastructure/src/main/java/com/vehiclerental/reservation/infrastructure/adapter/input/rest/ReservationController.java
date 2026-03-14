@@ -8,6 +8,8 @@ import com.vehiclerental.reservation.application.dto.response.TrackReservationRe
 import com.vehiclerental.reservation.application.port.input.CreateReservationUseCase;
 import com.vehiclerental.reservation.application.port.input.TrackReservationUseCase;
 import com.vehiclerental.reservation.infrastructure.adapter.input.rest.dto.CreateReservationRequest;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/reservations")
+@Tag(name = "Reservation Service", description = "Reservation creation and tracking")
 public class ReservationController {
 
     private final CreateReservationUseCase createReservationUseCase;
@@ -34,6 +37,8 @@ public class ReservationController {
     }
 
     @PostMapping
+    @Operation(summary = "Create a new reservation (starts SAGA)")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Reservation created in PENDING state")
     public ResponseEntity<ApiResponse<CreateReservationResponse>> createReservation(
             @Valid @RequestBody CreateReservationRequest request) {
 
@@ -58,6 +63,8 @@ public class ReservationController {
     }
 
     @GetMapping("/{trackingId}")
+    @Operation(summary = "Track reservation status by tracking ID")
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Reservation found")
     public ResponseEntity<ApiResponse<TrackReservationResponse>> trackReservation(
             @PathVariable String trackingId) {
         var response = trackReservationUseCase.execute(new TrackReservationCommand(trackingId));

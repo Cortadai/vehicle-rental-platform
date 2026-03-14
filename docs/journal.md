@@ -2902,3 +2902,67 @@ De los 3 escenarios de fallo (customer rejection, payment failure, fleet rejecti
 Con ambos flujos SAGA validados E2E (happy path + compensation), los posibles siguientes pasos son:
 - **MDC/correlationId propagation** — tracing distribuido
 - **OpenAPI documentation** — specs generadas desde los controllers
+
+---
+
+## Ciclo #28: openapi-documentation (2026-03-14)
+
+### Que se hizo
+
+Integracion de springdoc-openapi en los 4 servicios con Swagger UI navegable. Controllers anotados con @Tag, @Operation y @ApiResponse. Sin @Schema en DTOs — introspeccion automatica de Java records. Zero configuracion YAML.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `pom.xml` (root) | `swagger-annotations-jakarta:2.2.19` en dependencyManagement |
+| `customer-container/pom.xml` | `springdoc-openapi-starter-webmvc-ui` |
+| `fleet-container/pom.xml` | `springdoc-openapi-starter-webmvc-ui` |
+| `reservation-container/pom.xml` | `springdoc-openapi-starter-webmvc-ui` |
+| `payment-container/pom.xml` | `springdoc-openapi-starter-webmvc-ui` |
+| `customer-infrastructure/pom.xml` | `swagger-annotations-jakarta` |
+| `fleet-infrastructure/pom.xml` | `swagger-annotations-jakarta` |
+| `reservation-infrastructure/pom.xml` | `swagger-annotations-jakarta` |
+| `payment-infrastructure/pom.xml` | `swagger-annotations-jakarta` |
+| `CustomerController.java` | @Tag + @Operation + @ApiResponse en 5 metodos |
+| `VehicleController.java` | @Tag + @Operation + @ApiResponse en 5 metodos |
+| `ReservationController.java` | @Tag + @Operation + @ApiResponse en 2 metodos |
+| `PaymentController.java` | @Tag + @Operation + @ApiResponse en 3 metodos |
+| `CLAUDE.md` | Seccion Swagger UI con URLs de los 4 servicios |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Swagger UI | Ninguno | 4 servicios (localhost:8181-8184/swagger-ui.html) |
+| Endpoints documentados | 0 | 15 (con summary y response codes) |
+| @Schema en DTOs | N/A | 0 (introspeccion automatica) |
+| Config YAML springdoc | N/A | 0 lineas (autoconfiguracion) |
+| `mvn test` resultado | BUILD SUCCESS | BUILD SUCCESS (ArchUnit OK) |
+
+### Decisiones de diseno relevantes
+
+#### 1. Sin @Schema — solo controller annotations
+
+Springdoc 2.x con Java records genera specs razonables por introspeccion: tipos, nombres, @NotBlank → required. @Schema aportaria descriptions y examples pero requeriria `swagger-annotations` en application y common, rompiendo la pureza de capas. Decision: mantener la pureza arquitectonica sobre la riqueza de la documentacion.
+
+#### 2. swagger-annotations-jakarta en infrastructure, springdoc starter en container
+
+Los controllers viven en `*-infrastructure`, no en `*-container`. El starter completo (con Swagger UI, embedded server config) es un concern de deployment → container. Las anotaciones puras (@Tag, @Operation) son un concern de API documentation → infrastructure. Esto sigue la separacion de responsabilidades de la arquitectura hexagonal.
+
+#### 3. Fully qualified name para colision ApiResponse
+
+`com.vehiclerental.common.api.ApiResponse` (el del proyecto, usado en return types) se importa con import corto. `io.swagger.v3.oas.annotations.responses.ApiResponse` (el de swagger, solo en anotaciones) se usa con fully qualified name. El del proyecto aparece mas frecuentemente en el codigo funcional.
+
+### Lecciones aprendidas
+
+- **Los controllers viven en infrastructure pero las dependencias de runtime en container**: Esto crea un gap de compilacion. Las anotaciones necesitan estar disponibles en compile-time del modulo infrastructure, no solo en runtime del container. La solucion correcta es `swagger-annotations-jakarta` (solo anotaciones, ~50KB) en infrastructure y el starter completo en container.
+- **Springdoc 2.x con Java records es sorprendentemente completo sin @Schema**: Genera tipos correctos, mapea @NotBlank/@NotNull a `required`, y los nombres de campos de los records son descriptivos por si mismos. @Schema solo anade `description` y `example` — nice-to-have.
+- **La autoconfiguracion de springdoc elimina toda necesidad de YAML**: No hay que exponer endpoints de actuator ni configurar paths. Swagger UI aparece en `/swagger-ui.html` y la spec en `/v3/api-docs` out-of-the-box.
+- **ArchUnit no se dispara con anotaciones swagger en infrastructure**: Las reglas verifican imports de Spring, JPA y application — swagger es una libreria externa que no viola las boundaries hexagonales.
+
+### Siguiente paso
+
+Con Swagger UI, E2E y la mayoria de items cerrados, los unicos pendientes son:
+- **MDC/correlationId propagation** — tracing distribuido
+- **README para developers** — guia de onboarding

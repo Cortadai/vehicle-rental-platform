@@ -134,6 +134,17 @@ mvn spring-boot:run
 
 JaCoCo is permanently active (no profile needed). Coverage thresholds: domain/common 80%, application 75%, infrastructure 60%. Container modules are excluded via `jacoco.skip`.
 
+## Swagger UI
+
+Each service exposes Swagger UI (springdoc-openapi, zero config):
+
+| Service | Swagger UI |
+|---------|-----------|
+| Customer | http://localhost:8181/swagger-ui.html |
+| Fleet | http://localhost:8182/swagger-ui.html |
+| Reservation | http://localhost:8183/swagger-ui.html |
+| Payment | http://localhost:8184/swagger-ui.html |
+
 ## Bruno E2E Tests
 
 ```bash
