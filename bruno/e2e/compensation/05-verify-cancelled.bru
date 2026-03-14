@@ -1,0 +1,30 @@
+meta {
+  name: 05 Verify Cancelled
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{reservationUrl}}/api/v1/reservations/{{trackingId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.data.status: eq CANCELLED
+}
+
+script:pre-request {
+  // Give SAGA compensation time to complete:
+  // fleet rejects → payment refund command → payment refunded → cancel reservation
+  // Bruno CLI ignores pre-request scripts, but in the UI this provides a delay.
+  await new Promise(r => setTimeout(r, 8000));
+}
+
+tests {
+  test("failureMessages should contain at least one message", function() {
+    const failureMessages = res.body.data.failureMessages;
+    expect(failureMessages.length).to.be.greaterThan(0);
+  });
+}

@@ -1,0 +1,32 @@
+meta {
+  name: 01 Create Customer
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{customerUrl}}/api/v1/customers
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "firstName": "Compensation",
+    "lastName": "TestUser",
+    "email": "comp-{{$timestamp}}@test.com",
+    "phone": "+1234567890"
+  }
+}
+
+assert {
+  res.status: eq 201
+}
+
+script:post-response {
+  bru.setVar("customerId", res.body.data.customerId);
+}

@@ -73,7 +73,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
 ## Estado Actual del Proyecto
 
 ```
- 26 changes completados — SAGA Orchestration + Quality Gates + E2E
+ 27 changes completados — SAGA Orchestration + Quality Gates + E2E
  ================================================================
 
   #1  parent-pom-multi-module          }
@@ -106,6 +106,7 @@ Cada servicio sigue la misma arquitectura de 4 modulos:
   #24 docker-compose-services          }  Infrastructure
   #25 bruno-e2e-tests                  }  E2E Testing + bugfix payment events
   #26 database-indexes                 }  Flyway indexes for frequent filters
+  #27 bruno-e2e-compensation           }  E2E compensation flow
 ```
 
 ## Flujo SAGA End-to-End
@@ -305,6 +306,7 @@ Cobertura por capa (lineas):
   [x] ArchUnit hexagonal boundaries
   [x] Docker Compose (4 servicios)
   [x] Bruno E2E happy path SAGA
+  [x] Bruno E2E compensation flow
   [x] Database indexes (Flyway)
   [x] SAGA timeout/retry (diferido)
   [x] Idempotencia listeners (diferido)

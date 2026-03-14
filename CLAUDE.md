@@ -141,8 +141,11 @@ JaCoCo is permanently active (no profile needed). Coverage thresholds: domain/co
 npm install -g @usebruno/cli
 
 # Run E2E SAGA happy path (requires docker compose up -d)
-cd bruno/e2e
-bru run --env local
+cd bruno
+bru run --env local e2e/happy-path
+
+# Run E2E compensation flow (fleet rejects → payment refund → CANCELLED)
+bru run --env local e2e/compensation
 ```
 
-The `bruno/` folder contains API requests for all 4 services (manual exploration) and an `e2e/` subfolder with the SAGA happy path sequence (create customer, register vehicle, create reservation, verify CONFIRMED).
+The `bruno/` folder contains API requests for all 4 services (manual exploration) and `e2e/` subfolders with two SAGA flows: `happy-path/` (PENDING → CONFIRMED) and `compensation/` (fleet rejection → refund → CANCELLED).

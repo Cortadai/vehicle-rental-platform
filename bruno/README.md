@@ -54,11 +54,18 @@ bruno/
 │   ├── process-payment.bru
 │   ├── refund-payment.bru
 │   └── get-payment.bru
-└── e2e/                          # Flujo E2E automatizado — Happy Path SAGA
-    ├── 01-create-customer.bru
-    ├── 02-register-vehicle.bru
-    ├── 03-create-reservation.bru
-    └── 04-verify-confirmed.bru
+└── e2e/                          # Flujos E2E automatizados
+    ├── happy-path/               # Happy path SAGA (PENDING → CONFIRMED)
+    │   ├── 01-create-customer.bru
+    │   ├── 02-register-vehicle.bru
+    │   ├── 03-create-reservation.bru
+    │   └── 04-verify-confirmed.bru
+    └── compensation/             # Compensation flow (fleet rejects → refund → CANCELLED)
+        ├── 01-create-customer.bru
+        ├── 02-register-vehicle.bru
+        ├── 03-send-to-maintenance.bru
+        ├── 04-create-reservation.bru
+        └── 05-verify-cancelled.bru
 ```
 
 ### Carpetas por servicio (`customer-service/`, `fleet-service/`, etc.)
@@ -67,39 +74,29 @@ Requests individuales pensados para **exploración manual desde la UI de Bruno**
 
 ### Carpeta `e2e/`
 
-Secuencia automatizada que valida el **happy path SAGA completo**. Los ficheros están numerados para garantizar el orden de ejecución. Tienen aserciones y scripts que encadenan IDs entre requests automáticamente.
+Secuencias automatizadas que validan los flujos SAGA completos. Dos subflujos:
+
+- **`e2e/happy-path/`** — valida el camino exitoso: PENDING → CONFIRMED
+- **`e2e/compensation/`** — valida la cascade de compensación: fleet rechaza → payment refund → CANCELLED
+
+Los ficheros están numerados para garantizar el orden de ejecución. Tienen aserciones y scripts que encadenan IDs entre requests automáticamente.
 
 ---
 
-## Ejecutar el E2E (CLI)
+## Ejecutar los E2E (CLI)
 
 ```bash
 # Desde la carpeta bruno/
 cd bruno
-bru run --env local e2e
+
+# Happy path — SAGA completa exitosamente
+bru run --env local e2e/happy-path
+
+# Compensation flow — fleet rechaza, payment se revierte
+bru run --env local e2e/compensation
 ```
 
-Salida esperada:
-
-```
-e2e\01-create-customer (201) - 283 ms
-  ✓ res.status: eq 201
-
-e2e\02-register-vehicle (201) - 276 ms
-  ✓ res.status: eq 201
-
-e2e\03-create-reservation (201) - 278 ms
-  ✓ res.status: eq 201
-  ✓ res.body.data.status: eq PENDING
-
-e2e\04-verify-confirmed (200) - 272 ms
-  ✓ res.status: eq 200
-  ✓ res.body.data.status: eq CONFIRMED
-
-Requests: 4 (4 Passed) | Assertions: 6/6 | Status: ✓ PASS
-```
-
-### Qué valida el E2E
+### Happy path (4 requests, 6 assertions)
 
 | Paso | Request | Qué verifica |
 |------|---------|--------------|
@@ -108,7 +105,19 @@ Requests: 4 (4 Passed) | Assertions: 6/6 | Status: ✓ PASS
 | 03 | `POST /api/v1/reservations` | Reserva creada en estado `PENDING` → extrae `trackingId` |
 | 04 | `GET /api/v1/reservations/{trackingId}` | SAGA completada → estado `CONFIRMED` |
 
-El paso 04 espera a que la SAGA complete el flujo `PENDING → CUSTOMER_VALIDATED → PAID → CONFIRMED` a través de RabbitMQ.
+Valida el flujo `PENDING → CUSTOMER_VALIDATED → PAID → CONFIRMED` a través de RabbitMQ.
+
+### Compensation flow (5 requests, 7 assertions)
+
+| Paso | Request | Qué verifica |
+|------|---------|--------------|
+| 01 | `POST /api/v1/customers` | Customer creado → extrae `customerId` |
+| 02 | `POST /api/v1/vehicles` | Vehicle registrado → extrae `vehicleId` |
+| 03 | `POST /api/v1/vehicles/{id}/maintenance` | Vehicle pasa a MAINTENANCE (forzar rechazo fleet) |
+| 04 | `POST /api/v1/reservations` | Reserva creada en estado `PENDING` → extrae `trackingId` |
+| 05 | `GET /api/v1/reservations/{trackingId}` | SAGA compensada → estado `CANCELLED` + `failureMessages` no vacío |
+
+Valida la cascade: customer OK → payment OK → fleet RECHAZA → payment REFUND → reservation CANCELLED.
 
 ---
 

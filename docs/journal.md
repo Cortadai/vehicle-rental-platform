@@ -2840,3 +2840,65 @@ Con la mayoria de la deuda tecnica resuelta, los posibles siguientes pasos son:
 - **MDC/correlationId propagation** — tracing distribuido
 - **OpenAPI documentation** — specs generadas desde los controllers
 - **E2E de compensation flow** — validar SAGA compensation en Bruno
+
+---
+
+## Ciclo #27: bruno-e2e-compensation (2026-03-14)
+
+### Que se hizo
+
+Secuencia E2E con Bruno que valida el compensation flow SAGA completo: fleet rechaza un vehiculo en mantenimiento → payment refund → reservation CANCELLED. Tambien se reorganizo `e2e/` en subcarpetas `happy-path/` y `compensation/`.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `bruno/e2e/happy-path/*.bru` (4) | Movidos desde `bruno/e2e/` — sin cambios de contenido |
+| `bruno/e2e/compensation/01-create-customer.bru` | POST + assert 201 + extract customerId |
+| `bruno/e2e/compensation/02-register-vehicle.bru` | POST + assert 201 + extract vehicleId |
+| `bruno/e2e/compensation/03-send-to-maintenance.bru` | POST maintenance + assert 200 (forzar rechazo fleet) |
+| `bruno/e2e/compensation/04-create-reservation.bru` | POST + assert 201 + assert PENDING + extract trackingId |
+| `bruno/e2e/compensation/05-verify-cancelled.bru` | GET + assert CANCELLED + test failureMessages.length > 0 |
+| `bruno/README.md` | Estructura actualizada con ambos flujos y tablas de pasos |
+| `CLAUDE.md` | Seccion Bruno actualizada con ambos comandos `bru run` |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Flujos E2E | 1 (happy path) | 2 (happy path + compensation) |
+| Ficheros .bru en e2e/ | 4 | 9 (4 + 5) |
+| Assertions E2E totales | 6 | 13 (6 + 7) |
+| Tests E2E (Chai) | 0 | 1 (failureMessages) |
+| `bru run` commands | 1 | 2 |
+
+### Decisiones de diseno relevantes
+
+#### 1. Forzar rechazo via send-to-maintenance
+
+Crear un vehicle ACTIVE y luego enviarlo a MAINTENANCE con `POST /vehicles/{id}/maintenance` antes de crear la reserva. Fleet rechaza porque `status != ACTIVE`. Mas realista que usar un vehicleId inexistente — un vehicle en mantenimiento es un caso de negocio real.
+
+#### 2. Solo escenario C (fleet rejection), no A ni B
+
+De los 3 escenarios de fallo (customer rejection, payment failure, fleet rejection), solo el C ejercita compensacion real (PaymentStep.rollback → payment.refund.command → payment.refunded). Los otros dos fallan sin compensacion — menor valor E2E.
+
+#### 3. failureMessages con tests block, no bru.assert()
+
+`bru.assert()` no existe en Bruno CLI (QuickJS sandbox). Se usa `tests` block con Chai (`expect(failureMessages.length).to.be.greaterThan(0)`) que Bruno CLI si soporta. Se verifica `length > 0` en vez de `neq null` — un array vacio `[]` pasaria `neq null` pero no seria correcto.
+
+#### 4. Subcarpetas e2e/happy-path/ y e2e/compensation/
+
+`bru run` soporta subcarpetas: `bru run --env local e2e/happy-path`. Agrupa ambos flujos bajo el concepto E2E manteniendo ejecucion independiente.
+
+### Lecciones aprendidas
+
+- **Bruno CLI soporta `tests` blocks con Chai pero no `bru.assert()`**: Para verificaciones programaticas en CLI, usar `tests { test("name", function() { expect(...) }) }` en vez de scripts con `bru.assert()`.
+- **El compensation flow completa tan rapido como el happy path**: A pesar de tener mas roundtrips asincronos (fleet reject → refund command → refund response → cancel), la SAGA compensa en ~2s. El outbox polling cada 500ms mas la latencia de RabbitMQ local es muy rapida.
+- **Verificar el happy path despues de reorganizar carpetas es critico**: Bruno puede ser sensible a rutas relativas del environment. Confirmar que `bru run --env local e2e/happy-path` sigue verde antes de crear ficheros nuevos evita debugging innecesario.
+- **`send-to-maintenance` como setup de test es un patron reutilizable**: En vez de datos inventados (UUID inexistente), usar las APIs del sistema para crear el estado deseado. Es mas realista y ejercita mas codigo.
+
+### Siguiente paso
+
+Con ambos flujos SAGA validados E2E (happy path + compensation), los posibles siguientes pasos son:
+- **MDC/correlationId propagation** — tracing distribuido
+- **OpenAPI documentation** — specs generadas desde los controllers

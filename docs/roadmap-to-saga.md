@@ -104,4 +104,4 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 - [x] Evaluar MapStruct vs mappers manuales — DESCARTADO, MapStruct eliminado del POM (ver Decision Log)
 - [x] JaCoCo permanente con umbrales (change #22 — 80/75/60% por capa, containers excluidos)
 - [x] Tests para ApiMetadata/ApiResponse en common (7 tests directos)
-- [ ] E2E de compensation flow (validar que la SAGA compensa correctamente)
+- [x] E2E de compensation flow — Bruno e2e/compensation con fleet rejection + payment refund + CANCELLED (change #27)
