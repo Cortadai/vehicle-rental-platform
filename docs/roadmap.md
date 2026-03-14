@@ -94,7 +94,7 @@ Compensacion: Fleet rejected → rollback Payment (refund command) → cancel Re
 
 - [x] SAGA timeout/retry handling — DIFERIDO (ver Decision Log)
 - [x] Idempotencia de listeners — DIFERIDO (ver Decision Log)
-- [ ] MDC/correlationId propagation (tracing distribuido)
+- [x] MDC/correlationId propagation — Micrometer Tracing + OpenTelemetry + Grafana LGTM stack completo (changes #29 + #30)
 - [x] Docker Compose con 4 servicios — Paketo images, Actuator health, Spring Boot 3.4.13 (change #24)
 - [x] Bruno E2E tests — coleccion Bruno + happy path SAGA validado + bugfix serializacion payment events (change #25)
 - [x] Mover spring-boot-starter-test a dependencyManagement — DESCARTADO (ver Decision Log)

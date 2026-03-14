@@ -161,3 +161,15 @@ bru run --env local e2e/compensation
 ```
 
 The `bruno/` folder contains API requests for all 4 services (manual exploration) and `e2e/` subfolders with two SAGA flows: `happy-path/` (PENDING → CONFIRMED) and `compensation/` (fleet rejection → refund → CANCELLED).
+
+## Observability (Grafana Stack)
+
+All 4 services are instrumented with Micrometer Tracing + OpenTelemetry. Traces, logs and metrics flow through the Grafana stack:
+
+| UI | URL | Purpose |
+|----|-----|---------|
+| Grafana | http://localhost:3000 | Dashboards, Explore (logs/traces/metrics) |
+| Prometheus | http://localhost:9090 | Metrics scraping |
+| Alloy | http://localhost:12345 | Agent status (log collection + OTLP relay) |
+
+Traces propagate automatically through RabbitMQ messages — a full SAGA flow appears as a single trace in Tempo.

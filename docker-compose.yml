@@ -110,6 +110,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     depends_on:
       postgres:
         condition: service_healthy
@@ -131,6 +132,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     depends_on:
       postgres:
         condition: service_healthy
@@ -152,6 +154,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     depends_on:
       postgres:
         condition: service_healthy
@@ -173,6 +176,7 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     depends_on:
       postgres:
         condition: service_healthy

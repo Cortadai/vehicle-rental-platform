@@ -3044,3 +3044,74 @@ La infraestructura de observabilidad esta lista. El siguiente change (`observabi
 - Dependencias Maven (micrometer-tracing-bridge-otel, opentelemetry-exporter-otlp, micrometer-registry-prometheus)
 - application.yml (tracing, OTLP endpoint, actuator prometheus, logging correlation)
 - Verificacion: traces en Tempo, logs en Loki, metricas en Prometheus — todo visible en Grafana
+
+---
+
+## Ciclo #30: observability-instrumentation (2026-03-14)
+
+### Que se hizo
+
+Instrumentacion de los 4 microservicios con Micrometer Tracing (OpenTelemetry bridge), Prometheus metrics y logging correlation con traceId/spanId. Los servicios ahora emiten traces via OTLP a Alloy (→ Tempo), exponen metricas en `/actuator/prometheus` (→ Prometheus), y los logs incluyen traceId/spanId para correlacion en Loki. Se verifico con Bruno E2E y screenshots de Grafana como evidencia.
+
+### Cambios implementados
+
+| Fichero | Descripcion |
+|---------|-------------|
+| `pom.xml` (root) | Intento de dependencyManagement — revertido (BOM shadowing) |
+| `customer-container/pom.xml` | +3 deps: micrometer-tracing-bridge-otel, opentelemetry-exporter-otlp, micrometer-registry-prometheus |
+| `fleet-container/pom.xml` | +3 deps (idem) |
+| `reservation-container/pom.xml` | +3 deps (idem) |
+| `payment-container/pom.xml` | +3 deps (idem) |
+| `customer application.yml` | tracing, OTLP endpoint, actuator prometheus, logging correlation |
+| `fleet application.yml` | idem |
+| `reservation application.yml` | idem |
+| `payment application.yml` | idem |
+| `docker-compose.yml` | OTEL_EXPORTER_OTLP_ENDPOINT en 4 servicios |
+| `CLAUDE.md` | Seccion Observability con URLs de Grafana/Prometheus/Alloy |
+| `README.md` | Stack table, management interfaces, container count (11) |
+| `docs/screenshots/*.png` (6) | Evidencias de Grafana: home, Tempo traces, trace detail, JVM dashboard, Loki logs, Prometheus targets |
+
+### Metricas
+
+| Metrica | Antes | Despues |
+|---------|-------|---------|
+| Traces en Tempo | 0 | Activos (4 servicios emitiendo) |
+| Prometheus targets UP | 0/4 (down) | 4/4 (up, scrape 8-11ms) |
+| Logging correlation | Sin traceId | traceId + spanId en logs |
+| Actuator endpoints | health | health, info, prometheus |
+| RabbitMQ trace propagation | N/A | Automatica (Micrometer + Spring AMQP) |
+
+### Decisiones de diseno relevantes
+
+#### 1. NO declarar en parent dependencyManagement
+
+Declarar `micrometer-tracing-bridge-otel`, `opentelemetry-exporter-otlp` y `micrometer-registry-prometheus` en nuestro `dependencyManagement` **sin version** sombrea las entradas del Spring Boot BOM, causando "version missing". Fix: declararlas directamente en los container POMs sin pasar por nuestro dependencyManagement. El BOM del parent proporciona las versiones.
+
+#### 2. OTLP endpoint configurable via env var
+
+`management.otlp.tracing.endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces` — en Docker Compose apunta a `alloy:4318`, en local apunta a `localhost:4318` (o falla silenciosamente si Alloy no esta corriendo, sin romper la app).
+
+#### 3. Logging correlation con patron, no JSON
+
+`logging.pattern.correlation: "[${spring.application.name:},%X{traceId:-},%X{spanId:-}]"` — legible en terminal. JSON (ECS) diferido para cuando se necesite parseo automatico en Loki.
+
+### Lecciones aprendidas
+
+- **El BOM de Spring Boot gestiona Micrometer y OpenTelemetry — no redeclares en dependencyManagement**: Si declaras una dependencia en tu `dependencyManagement` sin version, Maven la toma como override y pierde la version del BOM. Declara directamente en los POMs hijos.
+- **Micrometer Tracing + Spring AMQP = propagacion automatica de traces en RabbitMQ**: Sin codigo manual. Los headers `traceparent` y `tracestate` se anaden y extraen automaticamente de los mensajes AMQP. Solo necesitas `micrometer-tracing-bridge-otel` en el classpath de TODOS los servicios.
+- **El outbox pattern rompe la continuidad del trace HTTP**: El trace del `POST /reservations` termina cuando la peticion HTTP retorna. Los mensajes SAGA se envian asincrónicamente via el outbox scheduler (otro thread, otro momento). Cada publicacion outbox genera un trace independiente. Esto es correcto arquitectonicamente — el outbox desacopla el request del messaging.
+- **Playwright MCP es util para capturar evidencias de UIs**: Screenshots automaticos de Grafana (Tempo, Loki, Prometheus, dashboards) como documentacion visual del stack funcionando.
+
+### Screenshots como evidencia
+
+Se capturaron 6 screenshots en `docs/screenshots/`:
+1. Grafana home — stack accesible
+2. Tempo traces — lista de traces de los 4 servicios
+3. Tempo trace detail — POST /api/v1/reservations (398ms)
+4. JVM dashboard — metricas reales (heap 156MiB, HTTP avg 7.37ms)
+5. Loki logs — 1K+ logs centralizados de todos los contenedores
+6. Prometheus targets — 4/4 UP con scrape times 8-11ms
+
+### Estado final del roadmap
+
+Con este change, **todos los items del roadmap Post-SAGA estan completados o diferidos conscientemente**. No quedan items pendientes.

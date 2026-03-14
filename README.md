@@ -139,6 +139,10 @@ Las dependencias siempre apuntan **hacia adentro**: `container -> infrastructure
 | Flyway | gestionado por Boot | Migraciones de base de datos |
 | Lombok | gestionado por Boot | Reduccion de boilerplate |
 | SpringDoc OpenAPI | 2.3.0 | Swagger UI + documentacion OpenAPI |
+| Micrometer Tracing | gestionado por Boot | Distributed tracing (bridge OpenTelemetry) |
+| OpenTelemetry OTLP | gestionado por Boot | Exportacion de traces |
+| Grafana + Loki + Tempo + Prometheus | — | Stack de observabilidad (logs, traces, metricas) |
+| Grafana Alloy | — | Agente de recoleccion (logs Docker + relay OTLP) |
 | Bruno CLI | — | Tests E2E contra Docker Compose |
 | Docker Compose | — | Orquestacion local |
 | Paketo Buildpacks | — | Generacion de imagenes OCI (sin Dockerfiles) |
@@ -208,7 +212,7 @@ vehicle-rental-platform/
 │   └── {service}/                    #   Requests por servicio (exploracion manual)
 │
 ├── docs/                              # 20 documentos de buenas practicas
-│   ├── journal.md                     #   Diario de aprendizaje (28 ciclos)
+│   ├── journal.md                     #   Diario de aprendizaje (30 ciclos)
 │   └── roadmap.md                    #   Hoja de ruta y registro de decisiones
 │
 └── openspec/                          # Artefactos de Spec-Driven Development
@@ -473,13 +477,13 @@ curl http://localhost:8184/actuator/health  # Payment
 
 ## Ejecucion con Docker Compose
 
-### Plataforma Completa (6 contenedores)
+### Plataforma Completa (11 contenedores)
 
 ```bash
 docker compose up -d
 ```
 
-Esto arranca PostgreSQL, RabbitMQ y los 4 microservicios. Los contenedores de infraestructura tienen healthchecks — los servicios esperan a que la infraestructura este sana antes de arrancar.
+Esto arranca la infraestructura (PostgreSQL, RabbitMQ), los 4 microservicios y el stack de observabilidad (Grafana, Loki, Tempo, Prometheus, Alloy).
 
 ```
 NOMBRE                       IMAGEN                                   PUERTO
@@ -489,6 +493,11 @@ vehicle-rental-customer      vehicle-rental/customer-service:latest   8181
 vehicle-rental-fleet         vehicle-rental/fleet-service:latest      8182
 vehicle-rental-reservation   vehicle-rental/reservation-service:latest 8183
 vehicle-rental-payment       vehicle-rental/payment-service:latest    8184
+vehicle-rental-grafana       grafana/grafana:latest                   3000
+vehicle-rental-loki          grafana/loki:latest                      3100
+vehicle-rental-tempo         grafana/tempo:2.7.2                      3200
+vehicle-rental-prometheus    prom/prometheus:latest                   9090
+vehicle-rental-alloy         grafana/alloy:latest                     4317, 4318, 12345
 ```
 
 ### Solo Infraestructura
@@ -508,6 +517,9 @@ Util cuando se ejecutan los servicios en local con `mvn spring-boot:run`.
 | Swagger UI (Fleet) | http://localhost:8182/swagger-ui.html | — |
 | Swagger UI (Reservation) | http://localhost:8183/swagger-ui.html | — |
 | Swagger UI (Payment) | http://localhost:8184/swagger-ui.html | — |
+| Grafana | http://localhost:3000 | admin / admin |
+| Prometheus | http://localhost:9090 | — |
+| Alloy | http://localhost:12345 | — |
 
 ### Operaciones con Contenedores
 
@@ -792,14 +804,14 @@ graph LR
     style ARCHIVE fill:#f3e5f5
 ```
 
-Se han completado y archivado **28 changes**, desde la configuracion inicial del multi-modulo Maven hasta la orquestacion SAGA completa, tests E2E y documentacion OpenAPI.
+Se han completado y archivado **30 changes**, desde la configuracion inicial del multi-modulo Maven hasta la orquestacion SAGA completa, tests E2E y documentacion OpenAPI.
 
 ### Documentacion del Proyecto
 
 | Documento | Proposito |
 |----------|---------|
 | [`bruno/README.md`](bruno/README.md) | Guia de la coleccion Bruno: estructura, E2E happy path y compensation |
-| [`docs/journal.md`](docs/journal.md) | Diario de aprendizaje con 28 ciclos de decisiones y lecciones aprendidas |
+| [`docs/journal.md`](docs/journal.md) | Diario de aprendizaje con 30 ciclos de decisiones y lecciones aprendidas |
 | [`docs/roadmap.md`](docs/roadmap.md) | Registro de decisiones arquitectonicas y hoja de ruta |
 | [`docs/*.md`](docs/) | 20 guias de buenas practicas con ejemplos de codigo y checklists |
 | [`openspec/project.md`](openspec/project.md) | Vision general de arquitectura y convenciones |
